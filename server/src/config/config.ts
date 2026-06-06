@@ -6,6 +6,7 @@ export const appConfig = registerAs('app', () => ({
   appUrl: process.env.APP_URL ?? 'http://localhost:5173',
   version: process.env.APP_VERSION ?? 'Local build',
   oidcAllowLocalIssuers: parseBooleanFlag(process.env.OIDC_ALLOW_LOCAL_ISSUERS, false),
+  oidcMobileRedirectUris: parseStringList(process.env.OIDC_MOBILE_REDIRECT_URIS, ['bookorbit://oauth2-callback']),
 }));
 
 export const dbConfig = registerAs('db', () => ({
@@ -44,6 +45,14 @@ export const oidcRuntimeConfig = registerAs('oidcRuntime', () => ({
   clockToleranceSecs: parsePositiveInteger(process.env.OIDC_CLOCK_TOLERANCE_SECS, 30),
   tokenExchangeTimeoutMs: parsePositiveInteger(process.env.OIDC_TOKEN_EXCHANGE_TIMEOUT_MS, 10_000),
 }));
+
+function parseStringList(value: string | undefined, fallback: string[]): string[] {
+  if (!value?.trim()) return fallback;
+  return value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);

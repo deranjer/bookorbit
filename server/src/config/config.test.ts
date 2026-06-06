@@ -25,6 +25,7 @@ function resetEnv(): void {
   delete process.env.OIDC_JWKS_CACHE_TTL_SECS;
   delete process.env.OIDC_CLOCK_TOLERANCE_SECS;
   delete process.env.OIDC_TOKEN_EXCHANGE_TIMEOUT_MS;
+  delete process.env.OIDC_MOBILE_REDIRECT_URIS;
 }
 
 describe('config', () => {
@@ -42,6 +43,7 @@ describe('config', () => {
       appUrl: 'http://localhost:5173',
       version: 'Local build',
       oidcAllowLocalIssuers: false,
+      oidcMobileRedirectUris: ['bookorbit://oauth2-callback'],
     });
   });
 
@@ -56,7 +58,13 @@ describe('config', () => {
       appUrl: 'https://bookorbit.local',
       version: 'v2.3.4',
       oidcAllowLocalIssuers: true,
+      oidcMobileRedirectUris: ['bookorbit://oauth2-callback'],
     });
+  });
+
+  it('parses OIDC_MOBILE_REDIRECT_URIS as comma-separated list', () => {
+    process.env.OIDC_MOBILE_REDIRECT_URIS = 'bookorbit://oauth2-callback, com.example.app://oauth2-callback';
+    expect(appConfig().oidcMobileRedirectUris).toEqual(['bookorbit://oauth2-callback', 'com.example.app://oauth2-callback']);
   });
 
   it('falls back to false when OIDC_ALLOW_LOCAL_ISSUERS is invalid', () => {
