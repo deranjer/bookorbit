@@ -83,7 +83,7 @@
       "pnpm exec prettier --write"
     ],
     "mobile/**/*.{ts,tsx}": [
-      "pnpm --dir mobile exec eslint --fix"
+      "pnpm --dir mobile exec eslint --fix --max-warnings 0"
     ]
   },
   "pnpm": {
