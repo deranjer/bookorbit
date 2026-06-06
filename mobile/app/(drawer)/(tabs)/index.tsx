@@ -7,7 +7,7 @@ import { Colors } from '@/src/constants/colors';
 import type { BookCard as BookCardType } from '@/src/api/types';
 
 function ScrollerSection({ title, type }: { title: string; type: 'continue-reading' | 'recently-added' }) {
-  const { data, refetch, isFetching } = useQuery({
+  const { data } = useQuery({
     queryKey: ['scroller', type],
     queryFn: () => getScroller(type, { limit: 20 }),
   });

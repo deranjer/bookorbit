@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { create } from 'axios';
 import { tokenStore } from '@/src/auth/tokenStore';
 import { serverUrlStore } from '@/src/auth/serverUrlStore';
 
@@ -6,7 +6,7 @@ let isRefreshing = false;
 
 // Without a timeout, requests to an unreachable host (e.g. an IP with a wrong/
 // missing port) hang forever and the UI spinner never resolves.
-export const api = axios.create({ timeout: 10000 });
+export const api = create({ timeout: 10000 });
 
 api.interceptors.request.use((config) => {
   const base = serverUrlStore.get();
