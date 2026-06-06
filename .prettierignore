@@ -1,0 +1,4 @@
+# Generated lockfiles — never reformat (the package manager owns their format)
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
