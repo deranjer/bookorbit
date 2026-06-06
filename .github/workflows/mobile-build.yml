@@ -1,0 +1,109 @@
+name: Mobile Build
+
+# Builds installable mobile binaries with EAS. Builds run on Expo's servers;
+# when one finishes, download the artifact from the build page on
+# https://expo.dev (Project → Builds) to sideload onto a device.
+#
+# Versioning: appVersionSource is "remote" (see mobile/eas.json), so EAS owns
+# the Android versionCode / iOS buildNumber and auto-increments them on every
+# build. The user-facing version name still comes from mobile/app.json
+# (expo.version) — bump that manually when you want a new marketing version.
+#
+# Android builds automatically on every push to main that touches mobile/**.
+# iOS only builds on a manual "Run workflow" dispatch, because iOS device
+# builds require Apple Developer credentials (see build-ios job below).
+#
+# Requires an EXPO_TOKEN repo secret: create a personal access token at
+# https://expo.dev/accounts/[account]/settings/access-tokens and add it
+# under Settings → Secrets and variables → Actions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Platform to build"
+        required: true
+        default: "android"
+        type: choice
+        options:
+          - android
+          - ios
+          - all
+      profile:
+        description: "EAS build profile"
+        required: true
+        default: "preview"
+        type: choice
+        options:
+          - preview
+          - production
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || inputs.platform == 'android' || inputs.platform == 'all' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build APK
+        working-directory: mobile
+        run: eas build --platform android --profile ${{ inputs.profile || 'preview' }} --non-interactive
+
+  # iOS device builds require an Apple Developer account ($99/yr) and the target
+  # device's UDID registered for ad-hoc provisioning. Credentials must be set up
+  # once with `eas credentials` (or `eas build` interactively) before this can
+  # run non-interactively. Until that's done, this job will fail — which is why
+  # it is gated to manual dispatch only and never runs on push.
+  build-ios:
+    name: Build iOS IPA
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.platform == 'ios' || inputs.platform == 'all') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build IPA
+        working-directory: mobile
+        run: eas build --platform ios --profile ${{ inputs.profile || 'preview' }} --non-interactive
