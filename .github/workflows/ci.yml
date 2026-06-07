@@ -42,7 +42,10 @@ jobs:
 
   pr-conventions:
     name: PR Conventions
-    if: github.event_name == 'pull_request'
+    # Branch-naming and issue-reference conventions are only enforced on the
+    # canonical upstream repo. On forks (e.g. PoC PRs within deranjer/bookorbit)
+    # the job is skipped so fork-internal PRs aren't blocked.
+    if: github.event_name == 'pull_request' && github.repository == 'bookorbit/bookorbit'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
