@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useAuthContext } from '@/src/context/AuthContext';
 import { serverUrlStore } from '@/src/auth/serverUrlStore';
@@ -11,6 +12,8 @@ export default function ServerSetupScreen() {
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const isInsecure = /^http:\/\//i.test(url.trim());
 
   async function handleConnect() {
     const trimmed = url.trim().replace(/\/$/, '');
@@ -52,6 +55,16 @@ export default function ServerSetupScreen() {
           onSubmitEditing={handleConnect}
         />
 
+        {isInsecure ? (
+          <View style={styles.warningRow}>
+            <Ionicons name="warning-outline" size={18} color={Colors.warning} style={styles.warningIcon} />
+            <Text style={styles.warning}>
+              Insecure connection. HTTP traffic — including your login — is sent unencrypted and can be read by others on the network. Use HTTPS whenever
+              possible.
+            </Text>
+          </View>
+        ) : null}
+
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <Pressable style={styles.button} onPress={handleConnect} disabled={loading}>
@@ -79,6 +92,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   error: { color: Colors.error, fontSize: 14, marginBottom: 12, textAlign: 'center' },
+  warningRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 12 },
+  warningIcon: { marginTop: 1 },
+  warning: { color: Colors.warning, fontSize: 13, lineHeight: 18, flex: 1 },
   button: {
     backgroundColor: Colors.accent,
     borderRadius: 10,

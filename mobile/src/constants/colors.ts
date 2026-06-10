@@ -8,5 +8,6 @@ export const Colors = {
   textMuted: '#666666',
   accent: '#4a9eff',
   error: '#ff6b6b',
+  warning: '#ffa94d',
   success: '#2f9e44',
 } as const;
