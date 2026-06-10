@@ -1,20 +1,17 @@
 import { useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
-import { BookCard } from '@/src/components/BookCard';
+import { BookGrid } from '@/src/components/BookGrid';
 import { getSeries, getSeriesBooks } from '@/src/api/series';
+import { PAGE_SIZE, useInfinitePage } from '@/src/lib/useInfinitePage';
 import { Colors } from '@/src/constants/colors';
-import type { BookCard as BookCardType, SeriesSummary } from '@/src/api/types';
-
-const NUM_COLUMNS = 3;
+import type { SeriesSummary } from '@/src/api/types';
 
 function SeriesBooks({ series, onBack }: { series: SeriesSummary; onBack: () => void }) {
-  const { data, refetch, isFetching } = useQuery({
+  const { items: books, refetch, isFetching, isFetchingNextPage, loadMore } = useInfinitePage({
     queryKey: ['seriesBooks', series.name],
-    queryFn: () => getSeriesBooks(series.name, { size: 100 }),
+    fetchPage: (page) => getSeriesBooks(series.name, { page, size: PAGE_SIZE }),
   });
-  const books = data?.items ?? [];
 
   return (
     <View style={styles.container}>
@@ -22,38 +19,29 @@ function SeriesBooks({ series, onBack }: { series: SeriesSummary; onBack: () => 
         <Ionicons name="chevron-back" size={22} color={Colors.accent} />
         <Text style={styles.backText} numberOfLines={1}>{series.name}</Text>
       </Pressable>
-      <FlatList
-        data={books}
-        numColumns={NUM_COLUMNS}
-        keyExtractor={(item: BookCardType) => String(item.id)}
-        renderItem={({ item }) => (
-          <View style={styles.cell}>
-            <BookCard book={item} />
-          </View>
-        )}
-        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} tintColor={Colors.accent} />}
-        contentContainerStyle={styles.grid}
-        ListEmptyComponent={
-          !isFetching ? (
-            <View style={styles.empty}>
-              <Text style={styles.emptyText}>No books in this series.</Text>
-            </View>
-          ) : null
-        }
+      <BookGrid
+        books={books}
+        refreshing={isFetching && !isFetchingNextPage}
+        onRefresh={refetch}
+        onEndReached={loadMore}
+        loadingMore={isFetchingNextPage}
+        isLoading={isFetching && books.length === 0}
+        emptyText="No books in this series."
       />
     </View>
   );
 }
 
 export default function SeriesScreen() {
-  const { data, refetch, isFetching } = useQuery({ queryKey: ['series'], queryFn: () => getSeries({ size: 100 }) });
+  const { items: series, refetch, isFetching, isFetchingNextPage, loadMore } = useInfinitePage({
+    queryKey: ['series'],
+    fetchPage: (page) => getSeries({ page, size: PAGE_SIZE }),
+  });
   const [selected, setSelected] = useState<SeriesSummary | null>(null);
 
   if (selected) {
     return <SeriesBooks series={selected} onBack={() => setSelected(null)} />;
   }
-
-  const series = data?.items ?? [];
 
   if (!isFetching && series.length === 0) {
     return (
@@ -69,7 +57,16 @@ export default function SeriesScreen() {
       style={styles.container}
       data={series}
       keyExtractor={(item: SeriesSummary) => item.name}
-      refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} tintColor={Colors.accent} />}
+      refreshControl={<RefreshControl refreshing={isFetching && !isFetchingNextPage} onRefresh={refetch} tintColor={Colors.accent} />}
+      onEndReached={loadMore}
+      onEndReachedThreshold={0.5}
+      ListFooterComponent={
+        isFetchingNextPage ? (
+          <View style={styles.footer}>
+            <ActivityIndicator color={Colors.accent} />
+          </View>
+        ) : null
+      }
       renderItem={({ item }) => (
         <Pressable style={styles.row} onPress={() => setSelected(item)}>
           <View style={styles.rowMeta}>
@@ -96,8 +93,5 @@ const styles = StyleSheet.create({
   rowMeta: { flex: 1, marginRight: 8 },
   rowName: { color: Colors.text, fontSize: 16, fontWeight: '500' },
   rowCount: { color: Colors.textSecondary, fontSize: 13, marginTop: 2 },
-  grid: { padding: 4 },
-  cell: { flex: 1 / NUM_COLUMNS },
-  empty: { alignItems: 'center', paddingTop: 60 },
-  emptyText: { color: Colors.textSecondary, fontSize: 15 },
+  footer: { paddingVertical: 16 },
 });

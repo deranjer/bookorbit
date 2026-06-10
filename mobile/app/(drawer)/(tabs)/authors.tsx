@@ -1,22 +1,19 @@
 import { useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
-import { BookCard } from '@/src/components/BookCard';
+import { BookGrid } from '@/src/components/BookGrid';
 import { getAuthors, getAuthorBooks } from '@/src/api/authors';
 import { authorThumbUri, coverHeaders } from '@/src/api/client';
+import { PAGE_SIZE, useInfinitePage } from '@/src/lib/useInfinitePage';
 import { Colors } from '@/src/constants/colors';
-import type { AuthorSummary, BookCard as BookCardType } from '@/src/api/types';
-
-const NUM_COLUMNS = 3;
+import type { AuthorSummary } from '@/src/api/types';
 
 function AuthorBooks({ author, onBack }: { author: AuthorSummary; onBack: () => void }) {
-  const { data, refetch, isFetching } = useQuery({
+  const { items: books, refetch, isFetching, isFetchingNextPage, loadMore } = useInfinitePage({
     queryKey: ['authorBooks', author.id],
-    queryFn: () => getAuthorBooks(author.id, { size: 100 }),
+    fetchPage: (page) => getAuthorBooks(author.id, { page, size: PAGE_SIZE }),
   });
-  const books = data?.items ?? [];
 
   return (
     <View style={styles.container}>
@@ -24,38 +21,29 @@ function AuthorBooks({ author, onBack }: { author: AuthorSummary; onBack: () => 
         <Ionicons name="chevron-back" size={22} color={Colors.accent} />
         <Text style={styles.backText} numberOfLines={1}>{author.name}</Text>
       </Pressable>
-      <FlatList
-        data={books}
-        numColumns={NUM_COLUMNS}
-        keyExtractor={(item: BookCardType) => String(item.id)}
-        renderItem={({ item }) => (
-          <View style={styles.cell}>
-            <BookCard book={item} />
-          </View>
-        )}
-        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} tintColor={Colors.accent} />}
-        contentContainerStyle={styles.grid}
-        ListEmptyComponent={
-          !isFetching ? (
-            <View style={styles.empty}>
-              <Text style={styles.emptyText}>No books for this author.</Text>
-            </View>
-          ) : null
-        }
+      <BookGrid
+        books={books}
+        refreshing={isFetching && !isFetchingNextPage}
+        onRefresh={refetch}
+        onEndReached={loadMore}
+        loadingMore={isFetchingNextPage}
+        isLoading={isFetching && books.length === 0}
+        emptyText="No books for this author."
       />
     </View>
   );
 }
 
 export default function AuthorsScreen() {
-  const { data, refetch, isFetching } = useQuery({ queryKey: ['authors'], queryFn: () => getAuthors({ size: 100 }) });
+  const { items: authors, refetch, isFetching, isFetchingNextPage, loadMore } = useInfinitePage({
+    queryKey: ['authors'],
+    fetchPage: (page) => getAuthors({ page, size: PAGE_SIZE }),
+  });
   const [selected, setSelected] = useState<AuthorSummary | null>(null);
 
   if (selected) {
     return <AuthorBooks author={selected} onBack={() => setSelected(null)} />;
   }
-
-  const authors = data?.items ?? [];
 
   if (!isFetching && authors.length === 0) {
     return (
@@ -71,7 +59,16 @@ export default function AuthorsScreen() {
       style={styles.container}
       data={authors}
       keyExtractor={(item: AuthorSummary) => String(item.id)}
-      refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} tintColor={Colors.accent} />}
+      refreshControl={<RefreshControl refreshing={isFetching && !isFetchingNextPage} onRefresh={refetch} tintColor={Colors.accent} />}
+      onEndReached={loadMore}
+      onEndReachedThreshold={0.5}
+      ListFooterComponent={
+        isFetchingNextPage ? (
+          <View style={styles.footer}>
+            <ActivityIndicator color={Colors.accent} />
+          </View>
+        ) : null
+      }
       renderItem={({ item }) => (
         <Pressable style={styles.row} onPress={() => setSelected(item)}>
           {item.imageUrl ? (
@@ -106,8 +103,5 @@ const styles = StyleSheet.create({
   rowMeta: { flex: 1, marginLeft: 12 },
   rowName: { color: Colors.text, fontSize: 16, fontWeight: '500' },
   rowCount: { color: Colors.textSecondary, fontSize: 13, marginTop: 2 },
-  grid: { padding: 4 },
-  cell: { flex: 1 / NUM_COLUMNS },
-  empty: { alignItems: 'center', paddingTop: 60 },
-  emptyText: { color: Colors.textSecondary, fontSize: 15 },
+  footer: { paddingVertical: 16 },
 });

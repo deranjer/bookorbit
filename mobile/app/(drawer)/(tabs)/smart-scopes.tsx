@@ -1,12 +1,10 @@
 import { useState } from 'react';
-import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { BookCard } from '@/src/components/BookCard';
+import { BookGrid } from '@/src/components/BookGrid';
 import { getSmartScopes, getSmartScopeBooks } from '@/src/api/smartScopes';
+import { PAGE_SIZE, useInfinitePage } from '@/src/lib/useInfinitePage';
 import { Colors } from '@/src/constants/colors';
-import type { BookCard as BookCardType } from '@/src/api/types';
-
-const NUM_COLUMNS = 3;
 
 export default function SmartScopesScreen() {
   const { data: scopes, refetch: refetchScopes, isFetching: isFetchingScopes } = useQuery({
@@ -17,20 +15,23 @@ export default function SmartScopesScreen() {
 
   const selectedId = activeId ?? scopes?.[0]?.id ?? null;
 
-  const { data: booksData, refetch: refetchBooks, isFetching: isFetchingBooks } = useQuery({
+  const {
+    items: books,
+    total,
+    refetch: refetchBooks,
+    isFetching: isFetchingBooks,
+    isFetchingNextPage,
+    loadMore,
+  } = useInfinitePage({
     queryKey: ['smartScopeBooks', selectedId],
-    queryFn: () => getSmartScopeBooks(selectedId!, { size: 100 }),
+    fetchPage: (page) => getSmartScopeBooks(selectedId!, { page, size: PAGE_SIZE }),
     enabled: selectedId !== null,
   });
 
-  const isFetching = isFetchingScopes || isFetchingBooks;
   const refetch = () => {
     refetchScopes();
     refetchBooks();
   };
-
-  const books = booksData?.items ?? [];
-  const total = booksData?.total ?? 0;
 
   if (!scopes || scopes.length === 0) {
     return (
@@ -60,28 +61,18 @@ export default function SmartScopesScreen() {
         ))}
       </ScrollView>
 
-      {selectedId !== null && (
+      {selectedId !== null && total !== null && (
         <Text style={styles.totalText}>{total} books</Text>
       )}
 
-      <FlatList
-        data={books}
-        numColumns={NUM_COLUMNS}
-        keyExtractor={(item: BookCardType) => String(item.id)}
-        renderItem={({ item }) => (
-          <View style={styles.cell}>
-            <BookCard book={item} />
-          </View>
-        )}
-        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={refetch} tintColor={Colors.accent} />}
-        contentContainerStyle={styles.grid}
-        ListEmptyComponent={
-          !isFetching ? (
-            <View style={styles.empty}>
-              <Text style={styles.emptyText}>No books match this scope.</Text>
-            </View>
-          ) : null
-        }
+      <BookGrid
+        books={books}
+        refreshing={(isFetchingBooks && !isFetchingNextPage) || isFetchingScopes}
+        onRefresh={refetch}
+        onEndReached={loadMore}
+        loadingMore={isFetchingNextPage}
+        isLoading={isFetchingBooks && books.length === 0}
+        emptyText="No books match this scope."
       />
     </View>
   );
@@ -101,8 +92,4 @@ const styles = StyleSheet.create({
   countBadge: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1, marginLeft: 6 },
   countText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   totalText: { color: Colors.textSecondary, fontSize: 13, marginHorizontal: 16, marginTop: 8, marginBottom: 4 },
-  grid: { padding: 4 },
-  cell: { flex: 1 / NUM_COLUMNS },
-  empty: { alignItems: 'center', paddingTop: 60 },
-  emptyText: { color: Colors.textSecondary, fontSize: 15 },
 });

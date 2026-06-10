@@ -1,13 +1,11 @@
 import { useState } from 'react';
-import { FlatList, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
-import { BookCard } from '@/src/components/BookCard';
+import { BookGrid } from '@/src/components/BookGrid';
 import { getLibraries, getLibraryBooks } from '@/src/api/libraries';
+import { PAGE_SIZE, useInfinitePage } from '@/src/lib/useInfinitePage';
 import { Colors } from '@/src/constants/colors';
-import type { BookCard as BookCardType } from '@/src/api/types';
-
-const NUM_COLUMNS = 3;
 
 export default function LibrariesScreen() {
   const {
@@ -23,13 +21,20 @@ export default function LibrariesScreen() {
   const selectedLibrary = libraries?.find((lib) => lib.id === selectedId) ?? null;
   const hasMultiple = (libraries?.length ?? 0) > 1;
 
-  const { data: booksData, refetch: refetchBooks, isFetching } = useQuery({
+  const {
+    items: books,
+    total,
+    refetch: refetchBooks,
+    isFetching,
+    isFetchingNextPage,
+    loadMore,
+  } = useInfinitePage({
     queryKey: ['libraryBooks', selectedId],
-    queryFn: () => getLibraryBooks(selectedId!, { size: 100 }),
+    fetchPage: (page) => getLibraryBooks(selectedId!, { page, size: PAGE_SIZE }),
     enabled: selectedId !== null,
   });
 
-  const books = booksData?.items ?? [];
+  const bookCount = total ?? selectedLibrary?.bookCount ?? null;
 
   const refresh = () => {
     refetchLibraries();
@@ -59,9 +64,16 @@ export default function LibrariesScreen() {
         onPress={() => hasMultiple && setPickerOpen(true)}
         disabled={!hasMultiple}
       >
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {selectedLibrary?.name ?? 'Library'}
-        </Text>
+        <View style={styles.headerTextWrap}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {selectedLibrary?.name ?? 'Library'}
+          </Text>
+          {bookCount !== null && (
+            <Text style={styles.headerCount}>
+              {bookCount} {bookCount === 1 ? 'book' : 'books'}
+            </Text>
+          )}
+        </View>
         {hasMultiple && <Ionicons name="chevron-down" size={20} color={Colors.textSecondary} />}
       </Pressable>
 
@@ -87,24 +99,14 @@ export default function LibrariesScreen() {
         </Pressable>
       </Modal>
 
-      <FlatList
-        data={books}
-        numColumns={NUM_COLUMNS}
-        keyExtractor={(item: BookCardType) => String(item.id)}
-        renderItem={({ item }) => (
-          <View style={styles.cell}>
-            <BookCard book={item} />
-          </View>
-        )}
-        refreshControl={
-          <RefreshControl refreshing={isFetching || librariesFetching} onRefresh={refresh} tintColor={Colors.accent} />
-        }
-        contentContainerStyle={styles.grid}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>No books in this library.</Text>
-          </View>
-        }
+      <BookGrid
+        books={books}
+        refreshing={(isFetching && !isFetchingNextPage) || librariesFetching}
+        onRefresh={refresh}
+        onEndReached={loadMore}
+        loadingMore={isFetchingNextPage}
+        isLoading={isFetching && books.length === 0}
+        emptyText="No books in this library."
       />
     </View>
   );
@@ -124,7 +126,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  headerTitle: { color: Colors.text, fontSize: 18, fontWeight: '700', flexShrink: 1 },
+  headerTextWrap: { flex: 1 },
+  headerTitle: { color: Colors.text, fontSize: 18, fontWeight: '700' },
+  headerCount: { color: Colors.textSecondary, fontSize: 13, marginTop: 2 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', paddingTop: 96, paddingHorizontal: 16 },
   sheet: { backgroundColor: Colors.surface, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
   sheetRow: {
@@ -139,8 +143,4 @@ const styles = StyleSheet.create({
   },
   sheetText: { color: Colors.text, fontSize: 16, flexShrink: 1 },
   sheetTextActive: { color: Colors.accent, fontWeight: '600' },
-  grid: { padding: 4 },
-  cell: { flex: 1 / NUM_COLUMNS },
-  empty: { flex: 1, alignItems: 'center', paddingTop: 60 },
-  emptyText: { color: Colors.textSecondary, fontSize: 15 },
 });
