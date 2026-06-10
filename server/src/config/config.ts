@@ -1,5 +1,5 @@
 import { registerAs } from '@nestjs/config';
-import { resolve } from 'path';
+import { join, resolve } from 'path';
 
 export const appConfig = registerAs('app', () => ({
   nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -7,6 +7,7 @@ export const appConfig = registerAs('app', () => ({
   version: process.env.APP_VERSION ?? 'Local build',
   oidcAllowLocalIssuers: parseBooleanFlag(process.env.OIDC_ALLOW_LOCAL_ISSUERS, false),
   oidcMobileRedirectUris: parseStringList(process.env.OIDC_MOBILE_REDIRECT_URIS, ['bookorbit://oauth2-callback']),
+  koboCloudscraperPython: process.env.KOBO_CLOUDSCRAPER_PYTHON?.trim() || undefined,
 }));
 
 export const dbConfig = registerAs('db', () => ({
@@ -21,9 +22,15 @@ export const authConfig = registerAs('auth', () => ({
   refreshRotationGraceMs: parsePositiveInteger(process.env.AUTH_REFRESH_ROTATION_GRACE_MS, 30_000),
 }));
 
-export const storageConfig = registerAs('storage', () => ({
-  appDataPath: resolve(process.env.APP_DATA_PATH ?? '/data'),
-}));
+export const storageConfig = registerAs('storage', () => {
+  const appDataPath = resolve(process.env.APP_DATA_PATH ?? '/data');
+  const bookDockPath = process.env.BOOK_DOCK_PATH?.trim();
+
+  return {
+    appDataPath,
+    bookDockPath: resolve(bookDockPath || join(appDataPath, 'book-dock')),
+  };
+});
 
 export const fileWriteConfig = registerAs('fileWrite', () => ({
   debounceMs: parsePositiveInteger(process.env.FILE_WRITE_DEBOUNCE_MS, 3_000),

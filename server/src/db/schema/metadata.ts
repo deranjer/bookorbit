@@ -30,6 +30,7 @@ const embedding256 = customType<{ data: number[]; driverData: string }>({
 });
 
 import { books } from './books';
+import { bookSeries } from './series';
 
 export const bookMetadata = pgTable(
   'book_metadata',
@@ -46,6 +47,7 @@ export const bookMetadata = pgTable(
     publishedYear: integer('published_year'),
     language: varchar('language', { length: 100 }),
     pageCount: integer('page_count'),
+    seriesId: integer('series_id').references(() => bookSeries.id, { onDelete: 'set null' }),
     seriesName: varchar('series_name', { length: 500 }),
     seriesIndex: real('series_index'),
     rating: integer('rating'),
@@ -56,6 +58,7 @@ export const bookMetadata = pgTable(
     hardcoverId: varchar('hardcover_id', { length: 255 }),
     openLibraryId: varchar('open_library_id', { length: 50 }),
     itunesId: varchar('itunes_id', { length: 50 }),
+    koboId: varchar('kobo_id', { length: 255 }),
     metadataScore: integer('metadata_score'),
     lastMetadataFetchAt: timestamp('last_metadata_fetch_at', { withTimezone: true }),
     embedding: embedding256('embedding'),
@@ -64,6 +67,7 @@ export const bookMetadata = pgTable(
     abridged: boolean('abridged').notNull().default(false),
     audibleId: varchar('audible_id', { length: 20 }),
     comicvineId: varchar('comicvine_id', { length: 50 }),
+    ranobedbId: varchar('ranobedb_id', { length: 50 }),
     chapters: jsonb('chapters'),
     lockedFields: text('locked_fields')
       .array()
@@ -78,6 +82,8 @@ export const bookMetadata = pgTable(
     index('bm_title_trgm_idx').using('gin', t.title.op('gin_trgm_ops')),
     index('bm_title_lower_idx').on(sql`lower(${t.title})`),
     index('bm_series_trgm_idx').using('gin', t.seriesName.op('gin_trgm_ops')),
+    index('bm_series_id_idx').on(t.seriesId),
+    index('bm_series_name_lower_btrim_idx').on(sql`lower(btrim(${t.seriesName}))`),
     index('bm_publisher_trgm_idx').using('gin', t.publisher.op('gin_trgm_ops')),
     index('bm_language_idx').on(t.language),
     index('bm_language_trgm_idx').using('gin', t.language.op('gin_trgm_ops')),

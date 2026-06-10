@@ -14,8 +14,20 @@ export interface FileMetadata {
   seriesIndex?: number | null
   isbn10?: string | null
   isbn13?: string | null
+  googleBooksId?: string | null
+  goodreadsId?: string | null
+  amazonId?: string | null
+  hardcoverId?: string | null
+  openLibraryId?: string | null
+  itunesId?: string | null
+  audibleId?: string | null
+  koboId?: string | null
+  comicvineId?: string | null
+  ranobedbId?: string | null
   authors?: string[]
   genres?: string[]
+  narrators?: string[]
+  durationSeconds?: number | null
   comicMetadata?: ComicMetadataFields
 }
 

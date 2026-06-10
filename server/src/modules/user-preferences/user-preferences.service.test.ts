@@ -30,7 +30,11 @@ const validDisplayPreferences: DisplayPreferences = {
   bookSpineOverlay: 'subtle',
   bookShadowStrength: 'strong',
   bookCoverDisplayMode: 'natural-bottom',
-  seriesCardCoverMode: 'mosaic',
+  seriesCardCoverMode: 'stack',
+  gridCardPrimaryLabel: 'hidden',
+  gridCardSecondaryLabel: 'hidden',
+  cardInfoMode: 'hover-overlay',
+  thumbnailClickAction: 'reader',
 };
 
 const repo = {
@@ -150,6 +154,47 @@ describe('UserPreferencesService', () => {
     expect(repo.upsert).toHaveBeenCalledWith(11, 'display', validDisplayPreferences);
   });
 
+  it('upsertDisplayPreferences accepts all valid thumbnailClickAction values', async () => {
+    for (const value of ['reader', 'details']) {
+      await expect(
+        service.upsertDisplayPreferences(11, { ...validDisplayPreferences, thumbnailClickAction: value } as unknown as Record<string, unknown>),
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it('upsertDisplayPreferences defaults thumbnailClickAction to reader when omitted', async () => {
+    const { thumbnailClickAction, ...withoutAction } = validDisplayPreferences;
+    void thumbnailClickAction;
+
+    await expect(service.upsertDisplayPreferences(11, withoutAction as unknown as Record<string, unknown>)).resolves.toBeUndefined();
+
+    expect(repo.upsert).toHaveBeenCalledWith(11, 'display', expect.objectContaining({ thumbnailClickAction: 'reader' }));
+  });
+
+  it('upsertDisplayPreferences rejects invalid thumbnailClickAction values', async () => {
+    await expect(
+      service.upsertDisplayPreferences(11, { ...validDisplayPreferences, thumbnailClickAction: 'preview' } as unknown as Record<string, unknown>),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(repo.upsert).not.toHaveBeenCalled();
+  });
+
+  it('upsertDisplayPreferences accepts all valid seriesCardCoverMode values', async () => {
+    for (const value of ['stack', 'mosaic', 'first-volume', 'latest-volume', 'first-unread']) {
+      await expect(
+        service.upsertDisplayPreferences(11, { ...validDisplayPreferences, seriesCardCoverMode: value } as unknown as Record<string, unknown>),
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it('upsertDisplayPreferences defaults seriesCardCoverMode to stack when omitted', async () => {
+    const { seriesCardCoverMode, ...withoutMode } = validDisplayPreferences;
+    void seriesCardCoverMode;
+
+    await expect(service.upsertDisplayPreferences(11, withoutMode as unknown as Record<string, unknown>)).resolves.toBeUndefined();
+
+    expect(repo.upsert).toHaveBeenCalledWith(11, 'display', expect.objectContaining({ seriesCardCoverMode: 'stack' }));
+  });
+
   it('upsertDisplayPreferences rejects invalid cover display modes', async () => {
     await expect(
       service.upsertDisplayPreferences(11, { ...validDisplayPreferences, bookCoverDisplayMode: 'stretched' } as never),
@@ -219,5 +264,50 @@ describe('UserPreferencesService', () => {
 
     await expect(service.upsertDisplayPreferences(11, validDisplayPreferences as unknown as Record<string, unknown>)).rejects.toBe(err);
     expect(repo.upsert).toHaveBeenCalledWith(11, 'display', validDisplayPreferences);
+  });
+
+  it('upsertDisplayPreferences accepts all valid gridCardPrimaryLabel values', async () => {
+    for (const value of ['hidden', 'book-title', 'series-title', 'series-title-position', 'author']) {
+      await expect(
+        service.upsertDisplayPreferences(11, { ...validDisplayPreferences, gridCardPrimaryLabel: value } as unknown as Record<string, unknown>),
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it('upsertDisplayPreferences accepts all valid gridCardSecondaryLabel values', async () => {
+    for (const value of ['hidden', 'book-title', 'series-title', 'series-title-position', 'author']) {
+      await expect(
+        service.upsertDisplayPreferences(11, { ...validDisplayPreferences, gridCardSecondaryLabel: value } as unknown as Record<string, unknown>),
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it('upsertDisplayPreferences rejects invalid gridCardPrimaryLabel value', async () => {
+    await expect(
+      service.upsertDisplayPreferences(11, { ...validDisplayPreferences, gridCardPrimaryLabel: 'unknown-field' } as unknown as Record<
+        string,
+        unknown
+      >),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('upsertDisplayPreferences rejects invalid gridCardSecondaryLabel value', async () => {
+    await expect(
+      service.upsertDisplayPreferences(11, { ...validDisplayPreferences, gridCardSecondaryLabel: 'bad-value' } as unknown as Record<string, unknown>),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('upsertDisplayPreferences defaults gridCardPrimaryLabel to hidden when omitted', async () => {
+    const { gridCardPrimaryLabel, ...withoutPrimary } = validDisplayPreferences;
+    void gridCardPrimaryLabel;
+    await expect(service.upsertDisplayPreferences(11, withoutPrimary as unknown as Record<string, unknown>)).resolves.toBeUndefined();
+    expect(repo.upsert).toHaveBeenCalledWith(11, 'display', expect.objectContaining({ gridCardPrimaryLabel: 'hidden' }));
+  });
+
+  it('upsertDisplayPreferences defaults gridCardSecondaryLabel to hidden when omitted', async () => {
+    const { gridCardSecondaryLabel, ...withoutSecondary } = validDisplayPreferences;
+    void gridCardSecondaryLabel;
+    await expect(service.upsertDisplayPreferences(11, withoutSecondary as unknown as Record<string, unknown>)).resolves.toBeUndefined();
+    expect(repo.upsert).toHaveBeenCalledWith(11, 'display', expect.objectContaining({ gridCardSecondaryLabel: 'hidden' }));
   });
 });

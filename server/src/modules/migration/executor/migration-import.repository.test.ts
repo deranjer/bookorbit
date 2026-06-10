@@ -32,6 +32,7 @@ describe('MigrationImportRepository', () => {
         title: 'Dune',
         openLibraryId: 'OL1W',
         itunesId: '123',
+        koboId: 'dune-kobo',
       },
       {
         bookId: 2,
@@ -48,7 +49,32 @@ describe('MigrationImportRepository', () => {
           title: expect.anything(),
           openLibraryId: expect.anything(),
           itunesId: expect.anything(),
+          koboId: expect.anything(),
           updatedAt: expect.anything(),
+        }),
+      }),
+    );
+  });
+
+  it('resolves series identity for batch metadata imports', async () => {
+    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+    const insert = vi.fn().mockReturnValue({ values });
+    const db = { insert };
+    const seriesIdentity = {
+      resolveMetadataPatch: vi.fn().mockResolvedValue({ bookId: 1, seriesName: 'Dune', seriesId: 88 }),
+    };
+
+    const repo = new MigrationImportRepository(db as never, seriesIdentity as never);
+    await repo.batchUpsertBookMetadata([{ bookId: 1, seriesName: '  Dune  ' }]);
+
+    expect(seriesIdentity.resolveMetadataPatch).toHaveBeenCalledWith({ bookId: 1, seriesName: '  Dune  ' }, db);
+    expect(values).toHaveBeenCalledWith({ bookId: 1, seriesName: 'Dune', seriesId: 88 });
+    expect(onConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({
+          seriesName: expect.anything(),
+          seriesId: expect.anything(),
         }),
       }),
     );

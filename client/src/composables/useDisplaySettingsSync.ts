@@ -118,6 +118,10 @@ export function initDisplaySettingsSync(): void {
         settings.bookShadowStrength.value,
         settings.bookCoverDisplayMode.value,
         settings.seriesCardCoverMode.value,
+        settings.gridCardPrimaryLabel.value,
+        settings.gridCardSecondaryLabel.value,
+        settings.cardInfoMode.value,
+        settings.thumbnailClickAction.value,
       ] as const,
     () => {
       if (isApplyingServerPrefs || !isSyncEnabled()) return

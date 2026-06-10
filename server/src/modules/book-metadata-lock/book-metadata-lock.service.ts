@@ -16,7 +16,9 @@ const PROVIDER_ID_LOCK_FIELDS_BY_PROVIDER: Partial<Record<MetadataProviderKey, B
   [MetadataProviderKey.OPEN_LIBRARY]: 'openLibraryId',
   [MetadataProviderKey.ITUNES]: 'itunesId',
   [MetadataProviderKey.AUDIBLE]: 'audibleId',
+  [MetadataProviderKey.KOBO]: 'koboId',
   [MetadataProviderKey.COMICVINE]: 'comicvineId',
+  [MetadataProviderKey.RANOBEDB]: 'ranobedbId',
 };
 
 const COMIC_METADATA_LOCK_FIELDS: Record<keyof ComicMetadataFields, BookMetadataLockField> = {
@@ -236,7 +238,9 @@ export class BookMetadataLockService {
     this.copyUpdateField(filteredDto, dto, 'openLibraryId', 'openLibraryId', lockedSet, skippedFields);
     this.copyUpdateField(filteredDto, dto, 'itunesId', 'itunesId', lockedSet, skippedFields);
     this.copyUpdateField(filteredDto, dto, 'audibleId', 'audibleId', lockedSet, skippedFields);
+    this.copyUpdateField(filteredDto, dto, 'koboId', 'koboId', lockedSet, skippedFields);
     this.copyUpdateField(filteredDto, dto, 'comicvineId', 'comicvineId', lockedSet, skippedFields);
+    this.copyUpdateField(filteredDto, dto, 'ranobedbId', 'ranobedbId', lockedSet, skippedFields);
 
     if (dto.audioMetadata) {
       const filteredAudioMetadata: NonNullable<UpdateBookMetadataDto['audioMetadata']> = {};
@@ -359,7 +363,9 @@ export class BookMetadataLockService {
     this.addFieldIfPresent(fields, dto, 'openLibraryId', 'openLibraryId');
     this.addFieldIfPresent(fields, dto, 'itunesId', 'itunesId');
     this.addFieldIfPresent(fields, dto, 'audibleId', 'audibleId');
+    this.addFieldIfPresent(fields, dto, 'koboId', 'koboId');
     this.addFieldIfPresent(fields, dto, 'comicvineId', 'comicvineId');
+    this.addFieldIfPresent(fields, dto, 'ranobedbId', 'ranobedbId');
 
     if (dto.audioMetadata) {
       this.addFieldIfPresent(fields, dto.audioMetadata, 'narrators', 'narrators');

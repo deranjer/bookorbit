@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { BookOpen, ExternalLink, Folder, FolderPlus, Headphones, Pencil, Star, Trash2, X } from 'lucide-vue-next'
+import { BookOpen, ExternalLink, Eye, Folder, FolderPlus, Headphones, Pencil, Star, Trash2, X } from 'lucide-vue-next'
 import { usePermissions } from '@/features/auth/composables/usePermissions'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -135,6 +135,15 @@ const providerLinks = computed<ProviderLink[]>(() => {
       fallback: '',
     })
   }
+  if (ids.ranobedb) {
+    out.push({
+      key: 'ranobedb',
+      label: 'RanobeDB',
+      url: `https://ranobedb.org/book/${ids.ranobedb}`,
+      iconUrl: providerIconPath('ranobedb'),
+      fallback: 'RN',
+    })
+  }
   return out
 })
 
@@ -195,14 +204,22 @@ function handleCoverClick() {
   if (coverLoaded.value && !coverFailed.value) coverLightboxOpen.value = true
 }
 
-function openBook() {
+function openBookWithMode(mode?: 'peek') {
   if (!primaryFile.value || !detail.value) return
   router.push({
     name: 'reader',
     params: { bookId: detail.value.id, fileId: primaryFile.value.id },
-    query: { format: primaryFile.value.format ?? 'epub' },
+    query: mode === 'peek' ? { format: primaryFile.value.format ?? 'epub', mode } : { format: primaryFile.value.format ?? 'epub' },
   })
   emit('update:open', false)
+}
+
+function openBook() {
+  openBookWithMode()
+}
+
+function peekBook() {
+  openBookWithMode('peek')
 }
 
 function editMetadata() {
@@ -463,6 +480,19 @@ function handleDelete() {
               <ExternalLink class="size-4" />
               <span class="hidden sm:inline">Details</span>
             </button>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <button
+                  class="flex items-center justify-center gap-1.5 h-9 px-3 rounded-md border border-input bg-background text-sm hover:bg-muted transition-colors disabled:opacity-50"
+                  :disabled="!primaryFile"
+                  aria-label="Peek"
+                  @click="peekBook"
+                >
+                  <Eye class="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Peek</TooltipContent>
+            </Tooltip>
             <Tooltip v-if="hasPermission('library_edit_metadata')">
               <TooltipTrigger as-child>
                 <button

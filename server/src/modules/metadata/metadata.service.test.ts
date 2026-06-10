@@ -1,5 +1,6 @@
 vi.mock('fs/promises', () => ({
   mkdir: vi.fn(),
+  readFile: vi.fn(),
   writeFile: vi.fn(),
   readdir: vi.fn().mockResolvedValue([]),
   rm: vi.fn(),
@@ -62,12 +63,17 @@ vi.mock('./extractors/audio.extractor', () => ({
   extractAudioMetadata: vi.fn().mockImplementation(() =>
     Promise.resolve({
       title: null,
+      subtitle: null,
       authors: [],
       narrators: [],
       publisher: null,
       publishedYear: null,
       description: null,
       language: null,
+      seriesName: null,
+      seriesIndex: null,
+      genres: [],
+      audibleId: null,
       durationSeconds: null,
       chapters: [],
       coverBytes: null,
@@ -76,7 +82,7 @@ vi.mock('./extractors/audio.extractor', () => ({
   parseAudioDuration: vi.fn().mockImplementation(() => Promise.resolve(null)),
 }));
 
-import { mkdir, readdir, rm, writeFile } from 'fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'fs/promises';
 import { Logger } from '@nestjs/common';
 
 import { authors, bookAuthors, bookGenres, bookMetadata, bookTags, genres, tags } from '../../db/schema';
@@ -91,6 +97,7 @@ import { METADATA_AUTHORS_REPLACED } from './metadata-events.service';
 import { MetadataService } from './metadata.service';
 
 const mockMkdir = mkdir as MockedFunction<typeof mkdir>;
+const mockReadFile = readFile as MockedFunction<typeof readFile>;
 const mockWriteFile = writeFile as MockedFunction<typeof writeFile>;
 const mockReaddir = readdir as MockedFunction<typeof readdir>;
 const mockRm = rm as MockedFunction<typeof rm>;
@@ -153,6 +160,7 @@ describe('MetadataService', () => {
     embedder.embedBook.mockResolvedValue(undefined);
 
     mockMkdir.mockResolvedValue(undefined);
+    mockReadFile.mockResolvedValue('');
     mockWriteFile.mockResolvedValue(undefined);
     mockReaddir.mockResolvedValue([]);
     mockRm.mockResolvedValue(undefined);
@@ -165,12 +173,17 @@ describe('MetadataService', () => {
     mockExtractEpubCover.mockResolvedValue(null);
     mockExtractAudioMetadata.mockResolvedValue({
       title: null,
+      subtitle: null,
       authors: [],
       narrators: [],
       publisher: null,
       publishedYear: null,
       description: null,
       language: null,
+      seriesName: null,
+      seriesIndex: null,
+      genres: [],
+      audibleId: null,
       durationSeconds: null,
       chapters: [],
       coverBytes: null,
@@ -287,6 +300,33 @@ describe('MetadataService', () => {
     expect(db.update).not.toHaveBeenCalled();
   });
 
+  it('extractAndSaveIfAvailable(opf) persists standalone sidecar OPF metadata', async () => {
+    const { db, updateSet } = makeDb();
+    const service = makeService(db);
+    const replaceAuthorsSpy = vi.spyOn(service, 'replaceAuthors').mockResolvedValue(undefined);
+
+    mockReadFile.mockResolvedValue(`
+      <package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+        <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+          <dc:title>Sidecar Title</dc:title>
+          <dc:creator opf:role="aut">Sidecar Author</dc:creator>
+          <dc:identifier opf:scheme="GOOGLE">google-sidecar</dc:identifier>
+        </metadata>
+      </package>
+    `);
+
+    await expect(service.extractAndSaveIfAvailable(55, '/books/metadata.opf', 'opf')).resolves.toBe(true);
+
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Sidecar Title',
+        googleBooksId: 'google-sidecar',
+        updatedAt: expect.any(Date),
+      }),
+    );
+    expect(replaceAuthorsSpy).toHaveBeenCalledWith(55, [{ name: 'Sidecar Author', sortName: null }]);
+  });
+
   it('refreshCoverForBook returns false and avoids db writes when extractor reports no cover', async () => {
     const { db } = makeDb();
     const service = makeService(db);
@@ -330,6 +370,7 @@ describe('MetadataService', () => {
       amazonId: null,
       hardcoverId: null,
       openLibraryId: null,
+      ranobedbId: null,
       itunesId: null,
       coverBuffer: null,
     });
@@ -383,6 +424,7 @@ describe('MetadataService', () => {
       amazonId: null,
       hardcoverId: null,
       openLibraryId: null,
+      ranobedbId: null,
       itunesId: null,
       coverBuffer: null,
     });
@@ -430,6 +472,7 @@ describe('MetadataService', () => {
         amazonId: null,
         hardcoverId: null,
         openLibraryId: null,
+        ranobedbId: null,
         itunesId: null,
         coverBuffer: null,
       });
@@ -469,6 +512,7 @@ describe('MetadataService', () => {
       amazonId: 'amazon-1',
       hardcoverId: 'hardcover-1',
       openLibraryId: 'open-library-1',
+      ranobedbId: 'ranobe-1',
       itunesId: 'itunes-1',
       coverBuffer: Buffer.from('jpeg-bytes'),
     });
@@ -497,6 +541,7 @@ describe('MetadataService', () => {
         amazonId: 'amazon-1',
         hardcoverId: 'hardcover-1',
         openLibraryId: 'open-library-1',
+        ranobedbId: 'ranobe-1',
         itunesId: 'itunes-1',
         updatedAt: expect.any(Date),
       }),
@@ -550,6 +595,78 @@ describe('MetadataService', () => {
     await service.extractAndSave(34, '/tmp/ancient-book.mobi', 'mobi');
 
     expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ publishedYear: null }));
+  });
+
+  it('extractAndSave(audio) persists expanded audiobook metadata through lock filtering', async () => {
+    const { db, updateSet } = makeDb();
+    const narratorService = {
+      replaceForBook: vi.fn().mockResolvedValue(undefined),
+    };
+    const lockService = {
+      isFieldLocked: vi.fn().mockResolvedValue(false),
+      filterAutomatedBookUpdate: vi.fn().mockImplementation((_bookId: number, dto: unknown) => Promise.resolve({ dto, skippedFields: [] })),
+    };
+    const service = makeService(db, undefined, {
+      narratorService,
+      bookMetadataLockService: lockService,
+    });
+    const replaceAuthorsSpy = vi.spyOn(service, 'replaceAuthors').mockResolvedValue(undefined);
+    const replaceGenresSpy = vi.spyOn(service, 'replaceGenres').mockResolvedValue(undefined);
+
+    mockExtractAudioMetadata.mockResolvedValueOnce({
+      title: 'Audio Title',
+      subtitle: 'Audio Subtitle',
+      authors: [{ name: 'Audio Author', sortName: null }],
+      narrators: ['Audio Narrator'],
+      publisher: 'Audio Publisher',
+      publishedYear: 2024,
+      description: 'Audio Description',
+      language: 'eng',
+      seriesName: 'Audio Series',
+      seriesIndex: 2,
+      genres: ['Fantasy', 'Adventure'],
+      audibleId: 'B0AUDIBLE',
+      durationSeconds: 1234,
+      chapters: [{ title: 'Chapter 1', startMs: 0 }],
+      coverBytes: null,
+    });
+
+    await service.extractAndSave(41, '/tmp/audio.m4b', 'm4b');
+
+    expect(lockService.filterAutomatedBookUpdate).toHaveBeenCalledWith(
+      41,
+      expect.objectContaining({
+        title: 'Audio Title',
+        subtitle: 'Audio Subtitle',
+        seriesName: 'Audio Series',
+        seriesIndex: 2,
+        genres: ['Fantasy', 'Adventure'],
+        audibleId: 'B0AUDIBLE',
+        audioMetadata: expect.objectContaining({
+          narrators: ['Audio Narrator'],
+          durationSeconds: 1234,
+          chapters: [{ title: 'Chapter 1', startMs: 0 }],
+        }),
+      }),
+    );
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Audio Title',
+        subtitle: 'Audio Subtitle',
+        publisher: 'Audio Publisher',
+        publishedYear: 2024,
+        language: 'eng',
+        seriesName: 'Audio Series',
+        seriesIndex: 2,
+        audibleId: 'B0AUDIBLE',
+        durationSeconds: 1234,
+        chapters: [{ title: 'Chapter 1', startMs: 0 }],
+        updatedAt: expect.any(Date),
+      }),
+    );
+    expect(replaceAuthorsSpy).toHaveBeenCalledWith(41, [{ name: 'Audio Author', sortName: null }]);
+    expect(replaceGenresSpy).toHaveBeenCalledWith(41, ['Fantasy', 'Adventure']);
+    expect(narratorService.replaceForBook).toHaveBeenCalledWith(41, ['Audio Narrator']);
   });
 
   it('replaceAuthors normalizes names and deduplicates case-insensitively before db writes', async () => {
@@ -759,9 +876,10 @@ describe('MetadataService', () => {
       isFieldLocked: vi.fn().mockResolvedValue(false),
       filterAutomatedBookUpdate: vi.fn().mockResolvedValue({
         dto: {
+          audibleId: 'B0SIDE',
           audioMetadata: {
-            chapters: [{ title: 'Chapter 1', start: 0, end: 10 }],
-            narrators: [{ name: 'Narrator A', sortName: null }],
+            chapters: [{ title: 'Chapter 1', startMs: 0 }],
+            narrators: ['Narrator A'],
           },
         },
         skippedFields: [],
@@ -774,25 +892,46 @@ describe('MetadataService', () => {
 
     mockExtractAudioMetadata.mockResolvedValueOnce({
       title: null,
+      subtitle: null,
       authors: [],
-      narrators: [{ name: 'Narrator A', sortName: null }],
+      narrators: ['Narrator A'],
       publisher: null,
       publishedYear: null,
       description: null,
       language: null,
+      seriesName: null,
+      seriesIndex: null,
+      genres: [],
+      audibleId: 'B0SIDE',
       durationSeconds: null,
-      chapters: [{ title: 'Chapter 1', start: 0, end: 10 }],
+      chapters: [{ title: 'Chapter 1', startMs: 0 }],
       coverBytes: null,
     });
     await service.extractAudioChaptersAndNarrators(70, '/tmp/audio.m4b', 'm4b');
 
+    expect(lockService.filterAutomatedBookUpdate).toHaveBeenCalledWith(
+      70,
+      expect.objectContaining({
+        audibleId: 'B0SIDE',
+        audioMetadata: expect.objectContaining({
+          chapters: [{ title: 'Chapter 1', startMs: 0 }],
+          narrators: ['Narrator A'],
+        }),
+      }),
+    );
     expect(updateSet).toHaveBeenCalledWith(
       expect.objectContaining({
-        chapters: [{ title: 'Chapter 1', start: 0, end: 10 }],
+        audibleId: 'B0SIDE',
         updatedAt: expect.any(Date),
       }),
     );
-    expect(narratorService.replaceForBook).toHaveBeenCalledWith(70, [{ name: 'Narrator A', sortName: null }]);
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chapters: [{ title: 'Chapter 1', startMs: 0 }],
+        updatedAt: expect.any(Date),
+      }),
+    );
+    expect(narratorService.replaceForBook).toHaveBeenCalledWith(70, ['Narrator A']);
 
     await expect(service.extractAudioChaptersAndNarrators(71, '/tmp/audio.unknown', 'unknown')).resolves.toBeUndefined();
 

@@ -51,6 +51,7 @@ export type FieldPreferenceOverrides = Partial<Record<MetadataField, FieldPrefer
 export interface MetadataFetchOptions {
   genres: {
     mode: GenreMergeMode;
+    blocklist: string[];
   };
   saveProviderIds: boolean;
 }
@@ -108,6 +109,12 @@ export interface ComicVineProviderConfig {
   apiKey: string;
 }
 
+export interface KoboProviderConfig {
+  enabled: boolean;
+  country: string;
+  language: string;
+}
+
 export interface ProviderConfigurations {
   google: GoogleProviderConfig;
   amazon: AmazonProviderConfig;
@@ -118,6 +125,8 @@ export interface ProviderConfigurations {
   audible: AudibleProviderConfig;
   audnexus: AudnexusProviderConfig;
   comicvine: ComicVineProviderConfig;
+  ranobedb: SimpleProviderConfig;
+  kobo: KoboProviderConfig;
 }
 
 export interface ProviderStatus {

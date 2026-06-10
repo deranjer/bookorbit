@@ -21,14 +21,17 @@ export interface ParsedOpf {
   amazonId: string | null;
   hardcoverId: string | null;
   openLibraryId: string | null;
+  ranobedbId: string | null;
+  koboId: string | null;
   itunesId: string | null;
+  coverHref: string | null;
 }
 
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
   removeNSPrefix: true,
-  isArray: (name) => ['creator', 'identifier', 'subject', 'title', 'meta', 'item'].includes(name),
+  isArray: (name) => ['creator', 'identifier', 'subject', 'title', 'meta', 'item', 'reference'].includes(name),
   textNodeName: '#text',
   allowBooleanAttributes: true,
   parseTagValue: false, // keep all values as strings — prevents leading-zero loss on ISBNs and numeric year conversion
@@ -203,6 +206,8 @@ export function parseOpf(xml: string): ParsedOpf {
   let schemeAmazonId: string | null = null;
   let schemeHardcoverId: string | null = null;
   let schemeOpenLibraryId: string | null = null;
+  let schemeRanobedbId: string | null = null;
+  let schemeKoboId: string | null = null;
   let schemeItunesId: string | null = null;
 
   let urnGoogleBooksId: string | null = null;
@@ -210,6 +215,8 @@ export function parseOpf(xml: string): ParsedOpf {
   let urnAmazonId: string | null = null;
   let urnHardcoverId: string | null = null;
   let urnOpenLibraryId: string | null = null;
+  let urnRanobedbId: string | null = null;
+  let urnKoboId: string | null = null;
   let urnItunesId: string | null = null;
 
   for (const ident of toArray(metadata['identifier'])) {
@@ -231,6 +238,8 @@ export function parseOpf(xml: string): ParsedOpf {
     if (scheme === 'goodreads') schemeGoodreadsId ??= value || null;
     if (scheme === 'hardcover') schemeHardcoverId ??= value || null;
     if (scheme === 'openlibrary') schemeOpenLibraryId ??= value || null;
+    if (scheme === 'ranobedb') schemeRanobedbId ??= value || null;
+    if (scheme === 'kobo') schemeKoboId ??= value || null;
     if (scheme === 'itunes') schemeItunesId ??= value || null;
 
     // urn:-prefixed provider identifiers (legacy / backward-compat)
@@ -239,6 +248,8 @@ export function parseOpf(xml: string): ParsedOpf {
     if (value.startsWith('urn:hardcover:')) urnHardcoverId ??= value.slice('urn:hardcover:'.length) || null;
     if (value.startsWith('urn:google:')) urnGoogleBooksId ??= value.slice('urn:google:'.length) || null;
     if (value.startsWith('urn:openlibrary:')) urnOpenLibraryId ??= value.slice('urn:openlibrary:'.length) || null;
+    if (value.startsWith('urn:ranobedb:')) urnRanobedbId ??= value.slice('urn:ranobedb:'.length) || null;
+    if (value.startsWith('urn:kobo:')) urnKoboId ??= value.slice('urn:kobo:'.length) || null;
     if (value.startsWith('urn:itunes:')) urnItunesId ??= value.slice('urn:itunes:'.length) || null;
   }
 
@@ -248,6 +259,8 @@ export function parseOpf(xml: string): ParsedOpf {
   const amazonId = schemeAmazonId ?? urnAmazonId;
   const hardcoverId = schemeHardcoverId ?? urnHardcoverId;
   const openLibraryId = schemeOpenLibraryId ?? urnOpenLibraryId;
+  const ranobedbId = schemeRanobedbId ?? urnRanobedbId;
+  const koboId = schemeKoboId ?? urnKoboId;
   const itunesId = schemeItunesId ?? urnItunesId;
 
   isbn10 ??= propertyMeta('bookorbit:isbn10') ?? namedMeta('bookorbit:isbn10');
@@ -293,6 +306,58 @@ export function parseOpf(xml: string): ParsedOpf {
   const rawDate = toArray(metadata['date'])[0];
   const publishedYear = rawDate ? parseYear(getText(rawDate)) : null;
 
+  // ── Cover href (for sidecar OPFs linking to a sibling image file) ──────────
+  // Priority 1: EPUB2 <guide><reference type="cover" href="..."/>
+  // Priority 2: EPUB3 <manifest><item properties="cover-image" href="..."/>
+  // Priority 3: Calibre <meta name="cover" content="manifest-item-id"/> -> manifest lookup
+  let coverHref: string | null = null;
+
+  const guide = (pkg['guide'] ?? {}) as Record<string, unknown>;
+  for (const ref of toArray(guide['reference'])) {
+    const ro = (typeof ref === 'object' && ref !== null ? ref : {}) as Record<string, unknown>;
+    const type = ((ro['@_type'] as string | undefined) ?? '').toLowerCase().trim();
+    if (type === 'cover') {
+      const href = ((ro['@_href'] as string | undefined) ?? '').trim();
+      if (href) {
+        coverHref = href;
+        break;
+      }
+    }
+  }
+
+  const manifest = (pkg['manifest'] ?? {}) as Record<string, unknown>;
+  const manifestItems = toArray(manifest['item']);
+
+  if (!coverHref) {
+    for (const item of manifestItems) {
+      const io = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>;
+      const props = ((io['@_properties'] as string | undefined) ?? '').split(/\s+/);
+      if (props.includes('cover-image')) {
+        const href = ((io['@_href'] as string | undefined) ?? '').trim();
+        if (href) {
+          coverHref = href;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!coverHref) {
+    const coverItemId = namedMeta('cover');
+    if (coverItemId) {
+      for (const item of manifestItems) {
+        const io = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>;
+        if ((io['@_id'] as string | undefined) === coverItemId) {
+          const href = ((io['@_href'] as string | undefined) ?? '').trim();
+          if (href) {
+            coverHref = href;
+            break;
+          }
+        }
+      }
+    }
+  }
+
   return {
     title: title || null,
     subtitle: subtitle || null,
@@ -314,6 +379,9 @@ export function parseOpf(xml: string): ParsedOpf {
     amazonId,
     hardcoverId,
     openLibraryId,
+    ranobedbId,
+    koboId,
     itunesId,
+    coverHref,
   };
 }

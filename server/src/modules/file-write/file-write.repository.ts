@@ -5,7 +5,22 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { WriteResult, WriteLogEntry } from '@bookorbit/types';
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
-import { authors, bookAuthors, bookFiles, bookGenres, bookMetadata, books, fileWriteLog, genres, libraries, tags, bookTags } from '../../db/schema';
+import {
+  authors,
+  bookAuthors,
+  bookFiles,
+  bookGenres,
+  bookMetadata,
+  bookNarrators,
+  books,
+  comicMetadata,
+  fileWriteLog,
+  genres,
+  libraries,
+  narrators,
+  tags,
+  bookTags,
+} from '../../db/schema';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -54,11 +69,29 @@ export class FileWriteRepository {
         fileWritePdfMaxFileSizeMb: libraries.fileWritePdfMaxFileSizeMb,
         fileWriteCbxEnabled: libraries.fileWriteCbxEnabled,
         fileWriteCbxMaxFileSizeMb: libraries.fileWriteCbxMaxFileSizeMb,
+        fileWriteAudioEnabled: libraries.fileWriteAudioEnabled,
+        fileWriteAudioMaxFileSizeMb: libraries.fileWriteAudioMaxFileSizeMb,
       })
       .from(libraries)
       .where(eq(libraries.id, libraryId))
       .limit(1);
     return row ?? null;
+  }
+
+  async findFilesForBook(bookId: number) {
+    return this.db
+      .select({
+        id: bookFiles.id,
+        absolutePath: bookFiles.absolutePath,
+        format: bookFiles.format,
+        sizeBytes: bookFiles.sizeBytes,
+        fileHash: bookFiles.fileHash,
+        libraryId: books.libraryId,
+      })
+      .from(bookFiles)
+      .innerJoin(books, eq(books.id, bookFiles.bookId))
+      .where(eq(bookFiles.bookId, bookId))
+      .orderBy(asc(bookFiles.sortOrder), asc(bookFiles.id));
   }
 
   async findNonMissingPrimaryFilesByLibrary(libraryId: number) {
@@ -88,13 +121,19 @@ export class FileWriteRepository {
     const [meta] = await this.db.select().from(bookMetadata).where(eq(bookMetadata.bookId, bookId)).limit(1);
     if (!meta) return null;
 
-    const [authorRows, genreRows, tagRows] = await Promise.all([
+    const [authorRows, narratorRows, genreRows, tagRows, comicRows] = await Promise.all([
       this.db
         .select({ name: authors.name, sortName: authors.sortName })
         .from(bookAuthors)
         .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
         .where(eq(bookAuthors.bookId, bookId))
         .orderBy(bookAuthors.displayOrder),
+      this.db
+        .select({ name: narrators.name })
+        .from(bookNarrators)
+        .innerJoin(narrators, eq(narrators.id, bookNarrators.narratorId))
+        .where(eq(bookNarrators.bookId, bookId))
+        .orderBy(bookNarrators.displayOrder),
       this.db
         .select({ name: genres.name })
         .from(bookGenres)
@@ -107,7 +146,25 @@ export class FileWriteRepository {
         .innerJoin(tags, eq(tags.id, bookTags.tagId))
         .where(eq(bookTags.bookId, bookId))
         .orderBy(asc(tags.name)),
+      this.db
+        .select({
+          issueNumber: comicMetadata.issueNumber,
+          volumeName: comicMetadata.volumeName,
+          pencillers: comicMetadata.pencillers,
+          inkers: comicMetadata.inkers,
+          colorists: comicMetadata.colorists,
+          letterers: comicMetadata.letterers,
+          coverArtists: comicMetadata.coverArtists,
+          characters: comicMetadata.characters,
+          teams: comicMetadata.teams,
+          locations: comicMetadata.locations,
+          storyArcs: comicMetadata.storyArcs,
+        })
+        .from(comicMetadata)
+        .where(eq(comicMetadata.bookId, bookId))
+        .limit(1),
     ]);
+    const comic = comicRows[0] ?? null;
 
     return {
       title: meta.title,
@@ -126,11 +183,26 @@ export class FileWriteRepository {
       amazonId: meta.amazonId,
       hardcoverId: meta.hardcoverId,
       openLibraryId: meta.openLibraryId,
+      ranobedbId: meta.ranobedbId,
+      koboId: meta.koboId,
       itunesId: meta.itunesId,
+      audibleId: meta.audibleId,
       rating: meta.rating,
       authors: authorRows,
+      narrators: narratorRows.map((n) => n.name),
       genres: genreRows.map((g) => g.name),
       tags: tagRows.map((t) => t.name),
+      comicIssueNumber: comic?.issueNumber ?? null,
+      comicVolumeName: comic?.volumeName ?? null,
+      comicPencillers: comic?.pencillers ?? [],
+      comicInkers: comic?.inkers ?? [],
+      comicColorists: comic?.colorists ?? [],
+      comicLetterers: comic?.letterers ?? [],
+      comicCoverArtists: comic?.coverArtists ?? [],
+      comicCharacters: comic?.characters ?? [],
+      comicTeams: comic?.teams ?? [],
+      comicLocations: comic?.locations ?? [],
+      comicStoryArcs: comic?.storyArcs ?? [],
     };
   }
 

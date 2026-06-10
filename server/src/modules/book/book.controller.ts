@@ -46,6 +46,7 @@ import { UpsertAudioProgressDto } from './dto/upsert-audio-progress.dto';
 import { UpdateBookMetadataAndLocksDto } from './dto/update-book-metadata-and-locks.dto';
 import { UpdateBookMetadataDto } from './dto/update-book-metadata.dto';
 import { SearchBooksDto } from './dto/search-books.dto';
+import { UpdateBookFileDto } from './dto/update-book-file.dto';
 import { SetStatusDto } from '../user-book-status/dto/set-status.dto';
 import { Permission, AuditAction, AuditResource } from '@bookorbit/types';
 import type { BookQuery } from '@bookorbit/types';
@@ -67,6 +68,10 @@ function stripLoneSurrogates(value: string): string {
     out += value[i];
   }
   return out;
+}
+
+function shouldSyncFileWrite(value: string | undefined): boolean {
+  return value === 'true';
 }
 
 function encodeFilenameStar(value: string): string | null {
@@ -472,7 +477,18 @@ export class BookController {
 
   @Get('files/:fileId/progress')
   async getFileProgress(@Param('fileId', ParseIntPipe) fileId: number, @CurrentUser() user: RequestUser) {
-    return (await this.bookService.getProgress(user.id, fileId, user)) ?? { cfi: null, pageNumber: null, percentage: 0 };
+    return (
+      (await this.bookService.getProgress(user.id, fileId, user)) ?? {
+        cfi: null,
+        pageNumber: null,
+        percentage: 0,
+        koboLocationSource: null,
+        koboLocationType: null,
+        koboLocationValue: null,
+        koboContentSourceProgressPercent: null,
+        koreaderProgress: null,
+      }
+    );
   }
 
   @Post('files/:fileId/progress')
@@ -484,6 +500,18 @@ export class BookController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async clearFileProgress(@Param('fileId', ParseIntPipe) fileId: number, @CurrentUser() user: RequestUser) {
     await this.bookService.clearFileProgress(user.id, fileId, user);
+  }
+
+  @Patch('files/:fileId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async renameFile(@Param('fileId', ParseIntPipe) fileId: number, @Body() dto: UpdateBookFileDto, @CurrentUser() user: RequestUser) {
+    await this.bookService.renameFile(fileId, dto, user);
+  }
+
+  @Delete('files/:fileId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteFile(@Param('fileId', ParseIntPipe) fileId: number, @CurrentUser() user: RequestUser) {
+    await this.bookService.deleteFile(fileId, user);
   }
 
   @Get(':id/audio-progress')
@@ -505,8 +533,15 @@ export class BookController {
     getResourceId: (req) => parseInt(req.params['id'] as string, 10),
     description: (req) => `Updated metadata for book #${req.params['id']}`,
   })
-  updateMetadata(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateBookMetadataDto, @CurrentUser() user: RequestUser) {
-    return this.bookService.updateMetadata(id, dto, user);
+  async updateMetadata(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateBookMetadataDto,
+    @CurrentUser() user: RequestUser,
+    @Query('syncFileWrite') syncFileWrite?: string,
+  ) {
+    const sync = shouldSyncFileWrite(syncFileWrite);
+    const result = await this.bookService.updateMetadata(id, dto, user, { postSaveMode: sync ? 'sync' : 'schedule' });
+    return sync ? result : result.book;
   }
 
   @Patch(':id/metadata-and-locks')
@@ -517,8 +552,15 @@ export class BookController {
     getResourceId: (req) => parseInt(req.params['id'] as string, 10),
     description: (req) => `Updated metadata and locks for book #${req.params['id']}`,
   })
-  updateMetadataAndLocks(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateBookMetadataAndLocksDto, @CurrentUser() user: RequestUser) {
-    return this.bookService.updateMetadataAndLocks(id, dto, user);
+  async updateMetadataAndLocks(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateBookMetadataAndLocksDto,
+    @CurrentUser() user: RequestUser,
+    @Query('syncFileWrite') syncFileWrite?: string,
+  ) {
+    const sync = shouldSyncFileWrite(syncFileWrite);
+    const result = await this.bookService.updateMetadataAndLocks(id, dto, user, { postSaveMode: sync ? 'sync' : 'schedule' });
+    return sync ? result : result.book;
   }
 
   @Patch(':id/metadata-locks')

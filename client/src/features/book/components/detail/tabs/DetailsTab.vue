@@ -5,12 +5,14 @@ import {
   BookOpen,
   Check,
   ChevronDown,
+  Eye,
   Library,
   Headphones,
   Lock,
   MoreHorizontal,
   Pencil,
   RotateCcw,
+  Send,
   Star,
   Trash2,
   TriangleAlert,
@@ -36,6 +38,7 @@ import { usePermissions } from '@/features/auth/composables/usePermissions'
 import { useDeleteBook } from '@/features/book/composables/useDeleteBook'
 import { useMetadataLocks } from '@/features/book/composables/useMetadataLocks'
 import DeleteBookDialog from '@/features/book/components/DeleteBookDialog.vue'
+import SendBookDialog from '@/features/email/components/SendBookDialog.vue'
 import AddToCollectionSheet from '@/features/collection/components/AddToCollectionSheet.vue'
 import MetadataScoreBadge from '@/features/metadata-score/components/MetadataScoreBadge.vue'
 import MetadataScoreBreakdown from '@/features/metadata-score/components/MetadataScoreBreakdown.vue'
@@ -83,6 +86,7 @@ const moreMenuOpen = ref(false)
 const mobileMoreMenuOpen = ref(false)
 const readMenuOpen = ref(false)
 const mobileReadMenuOpen = ref(false)
+const showSendDialog = ref(false)
 
 const { weights: scoreWeights, fetchWeights } = useMetadataScoreWeights()
 const { bookProgress: koreaderBookProgress, fetchBookProgress: fetchKoreaderProgress } = useKoreaderBookProgress()
@@ -297,7 +301,7 @@ const openableFiles = computed(() => {
   return readableFiles.value
 })
 const hasMultipleFiles = computed(() => openableFiles.value.length > 1)
-const authorLine = computed(() => props.book.authors.map((a) => a.name).join(', ') || null)
+const authorLinks = computed(() => props.book.authors.filter((author) => author.name.trim().length > 0))
 const narratorLine = computed(() => props.book.audioMetadata?.narrators?.map((n) => n.name).join(', ') || null)
 const formats = computed(() => {
   const all = [...new Set(props.book.files.filter((f) => f.format && FORMAT_TO_GROUP[f.format]).map((f) => f.format!))]
@@ -579,6 +583,24 @@ const providerLinks = computed<ProviderLink[]>(() => {
       fallback: 'Au',
     })
   }
+  if (ids.kobo) {
+    out.push({
+      key: 'kobo',
+      label: 'Kobo',
+      url: `https://www.kobo.com/us/en/ebook/${encodeURIComponent(ids.kobo)}`,
+      iconUrl: providerIconPath('kobo'),
+      fallback: 'K',
+    })
+  }
+  if (ids.ranobedb) {
+    out.push({
+      key: 'ranobedb',
+      label: 'RanobeDB',
+      url: `https://ranobedb.org/book/${ids.ranobedb}`,
+      iconUrl: providerIconPath('ranobedb'),
+      fallback: 'RN',
+    })
+  }
   return out
 })
 
@@ -648,7 +670,7 @@ const leftColumnProgressRows = computed<ProgressRow[]>(() => {
   if (canViewKoreader.value && koreaderBookProgress.value != null && koreaderBookProgress.value.canonicalPercentage > 0) {
     const koreaderColor = '#b3b910'
     rows.push({
-      label: 'KO',
+      label: 'KO-R',
       percentage: koreaderBookProgress.value.canonicalPercentage,
       color: koreaderColor,
       badgeStyle: { color: koreaderColor, borderColor: `${koreaderColor}66`, backgroundColor: `${koreaderColor}1a` },
@@ -666,9 +688,9 @@ const koboAnomaly = computed(() => {
   if (!canViewKobo.value) return null
   const snap = koboState.value?.snapshot
   if (!snap) return null
-  if (snap.pendingDelete) return 'Pending delete from device'
-  if (snap.removedByDevice) return 'Removed by device'
-  if (snap.synced === false) return 'Not synced'
+  if (snap.pendingDelete) return { label: 'Pending delete from device', tooltip: 'Kobo will remove it on next sync.' }
+  if (snap.removedByDevice) return { label: 'Removed by device', tooltip: 'Kobo reported this book removed.' }
+  if (snap.synced === false) return { label: 'Not synced', tooltip: 'Queued for next Kobo sync.' }
   return null
 })
 
@@ -727,6 +749,12 @@ function handleDeleteFromMenu() {
   promptDelete(props.book.id)
 }
 
+function handleSendFromMenu() {
+  moreMenuOpen.value = false
+  mobileMoreMenuOpen.value = false
+  showSendDialog.value = true
+}
+
 function handleCoverLoad(ratio: number | null) {
   coverLoaded.value = true
   coverFailed.value = false
@@ -749,22 +777,30 @@ function openEditCover() {
   router.push({ name: 'book-detail', params: { bookId: props.book.id }, query: { tab: 'edit' } })
 }
 
-function openBook() {
+function openBookWithMode(mode?: 'peek') {
   if (!primaryFile.value) return
   router.push({
     name: 'reader',
     params: { bookId: props.book.id, fileId: primaryFile.value.id },
-    query: { format: primaryFile.value.format ?? 'epub' },
+    query: mode === 'peek' ? { format: primaryFile.value.format ?? 'epub', mode } : { format: primaryFile.value.format ?? 'epub' },
   })
 }
 
-function openBookFile(file: BookDetail['files'][number]) {
+function openBook() {
+  openBookWithMode()
+}
+
+function peekBook() {
+  openBookWithMode('peek')
+}
+
+function openBookFile(file: BookDetail['files'][number], mode?: 'peek') {
   readMenuOpen.value = false
   mobileReadMenuOpen.value = false
   router.push({
     name: 'reader',
     params: { bookId: props.book.id, fileId: file.id },
-    query: { format: file.format ?? 'epub' },
+    query: mode === 'peek' ? { format: file.format ?? 'epub', mode } : { format: file.format ?? 'epub' },
   })
 }
 
@@ -955,20 +991,29 @@ watch(
 
         <!-- Author / narrator / series -->
         <div class="mt-2 space-y-1 min-w-0">
-          <p v-if="authorLine" class="text-xs break-words">
+          <p v-if="authorLinks.length" class="text-xs break-words">
             <span class="text-muted-foreground">by</span>
-            <span class="ml-1 font-medium text-foreground">{{ authorLine }}</span>
+            <span class="ml-1 font-medium text-foreground">
+              <template v-for="(author, index) in authorLinks" :key="`${author.id}-${index}`">
+                <RouterLink
+                  :to="{ name: 'author-detail', params: { id: author.id } }"
+                  class="hover:text-primary hover:underline underline-offset-2 transition-colors"
+                  >{{ author.name }}</RouterLink
+                ><span v-if="index < authorLinks.length - 1">, </span>
+              </template>
+            </span>
           </p>
           <p v-if="narratorLine" class="text-xs break-words">
             <span class="text-muted-foreground">narrated by</span>
             <span class="ml-1 font-medium text-foreground">{{ narratorLine }}</span>
           </p>
           <RouterLink
-            v-if="seriesLine"
-            :to="{ name: 'series-detail', params: { seriesName: book.seriesName! } }"
+            v-if="seriesLine && book.seriesId != null"
+            :to="{ name: 'series-detail', params: { seriesId: book.seriesId } }"
             class="inline-block text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
             >{{ seriesLine }}</RouterLink
           >
+          <span v-else-if="seriesLine" class="inline-block text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">{{ seriesLine }}</span>
         </div>
         <!-- Stars: own row -->
         <div class="mt-2 flex items-center gap-0.5" @mouseleave="hoverRating = null">
@@ -1075,6 +1120,19 @@ watch(
         <BookOpen v-else class="size-4" />
         {{ isPrimaryAudio ? 'Listen' : 'Read' }}
       </button>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <button
+            class="flex items-center justify-center h-9 w-12 rounded-md border border-input bg-background hover:bg-muted transition-colors disabled:opacity-50"
+            :disabled="!primaryFile"
+            aria-label="Peek"
+            @click="peekBook"
+          >
+            <Eye class="size-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Peek</TooltipContent>
+      </Tooltip>
       <div v-if="hasPermission('library_download')" class="w-12 shrink-0">
         <BookDownloadButton :files="book.files" :book-id="book.id" />
       </div>
@@ -1084,14 +1142,27 @@ watch(
       >
         <Library class="size-3.5" />
       </button>
-      <Popover v-if="hasPermission('library_delete_books')" :open="mobileMoreMenuOpen" @update:open="(v) => (mobileMoreMenuOpen = v)">
+      <Popover
+        v-if="hasPermission('library_delete_books') || hasPermission('email_send')"
+        :open="mobileMoreMenuOpen"
+        @update:open="(v) => (mobileMoreMenuOpen = v)"
+      >
         <PopoverTrigger as-child>
           <button class="flex items-center justify-center h-9 w-9 rounded-md border border-input bg-background hover:bg-muted transition-colors">
             <MoreHorizontal class="size-3.5" />
           </button>
         </PopoverTrigger>
-        <PopoverContent class="w-36 p-1" align="end">
+        <PopoverContent class="w-44 p-1" align="end">
           <button
+            v-if="hasPermission('email_send')"
+            class="flex w-full items-center gap-2 px-2 py-1.5 rounded text-sm text-foreground hover:bg-muted transition-colors"
+            @click="handleSendFromMenu"
+          >
+            <Send class="size-3.5" />
+            Send via Email
+          </button>
+          <button
+            v-if="hasPermission('library_delete_books')"
             class="flex w-full items-center gap-2 px-2 py-1.5 rounded text-sm text-destructive hover:bg-destructive/10 transition-colors"
             @click="handleDeleteFromMenu"
           >
@@ -1143,58 +1214,74 @@ watch(
         </BookCoverSurface>
 
         <div class="mt-4 space-y-2">
-          <!-- Read/Play button: split when multiple files, plain when single -->
-          <div v-if="hasMultipleFiles" class="flex w-full h-9 rounded-md overflow-hidden">
+          <div class="flex gap-2">
+            <!-- Read/Play button: split when multiple files, plain when single -->
+            <div v-if="hasMultipleFiles" class="flex flex-1 h-9 rounded-md overflow-hidden">
+              <button
+                class="flex flex-1 items-center justify-center gap-2 bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+                :disabled="!primaryFile"
+                @click="openBook"
+              >
+                <BookOpen v-if="isPrimaryAudio" class="size-4" />
+                <BookOpen v-else class="size-4" />
+                {{ isPrimaryAudio ? 'Listen' : 'Read' }}
+              </button>
+              <div class="w-px bg-primary-foreground/20 shrink-0" />
+              <Popover :open="readMenuOpen" @update:open="(v) => (readMenuOpen = v)">
+                <PopoverTrigger as-child>
+                  <button
+                    class="w-8 shrink-0 flex items-center justify-center bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                    title="Choose format"
+                  >
+                    <ChevronDown class="size-3.5" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent class="w-52 p-1" align="end">
+                  <button
+                    v-for="file in openableFiles"
+                    :key="file.id"
+                    class="flex w-full items-center gap-2.5 px-2 py-1.5 rounded text-sm hover:bg-muted transition-colors"
+                    @click="openBookFile(file)"
+                  >
+                    <span
+                      class="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0"
+                      :style="formatBadgeStyle(file.format ?? '?')"
+                      >{{ file.format ?? '?' }}</span
+                    >
+                    <span class="flex-1 text-left text-muted-foreground text-xs truncate">
+                      <template v-if="isMultiTrackAudio && FORMAT_TO_GROUP[file.format!] === 'audio'">Audiobook</template>
+                      <template v-else>{{ formatFileSize(file.sizeBytes) }}</template>
+                    </span>
+                    <span v-if="file.role === 'primary' && !isMultiTrackAudio" class="text-[10px] text-primary font-medium shrink-0">Primary</span>
+                  </button>
+                </PopoverContent>
+              </Popover>
+            </div>
             <button
-              class="flex flex-1 items-center justify-center gap-2 bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+              v-else
+              class="flex flex-1 items-center justify-center gap-2 h-9 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
               :disabled="!primaryFile"
               @click="openBook"
             >
-              <BookOpen v-if="isPrimaryAudio" class="size-4" />
+              <Headphones v-if="isPrimaryAudio" class="size-4" />
               <BookOpen v-else class="size-4" />
               {{ isPrimaryAudio ? 'Listen' : 'Read' }}
             </button>
-            <div class="w-px bg-primary-foreground/20 shrink-0" />
-            <Popover :open="readMenuOpen" @update:open="(v) => (readMenuOpen = v)">
-              <PopoverTrigger as-child>
+
+            <Tooltip>
+              <TooltipTrigger as-child>
                 <button
-                  class="w-8 shrink-0 flex items-center justify-center bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                  title="Choose format"
+                  class="flex items-center justify-center h-9 w-12 shrink-0 rounded-md border border-input bg-background hover:bg-muted transition-colors disabled:opacity-50"
+                  :disabled="!primaryFile"
+                  aria-label="Peek"
+                  @click="peekBook"
                 >
-                  <ChevronDown class="size-3.5" />
+                  <Eye class="size-4" />
                 </button>
-              </PopoverTrigger>
-              <PopoverContent class="w-52 p-1" align="end">
-                <button
-                  v-for="file in openableFiles"
-                  :key="file.id"
-                  class="flex w-full items-center gap-2.5 px-2 py-1.5 rounded text-sm hover:bg-muted transition-colors"
-                  @click="openBookFile(file)"
-                >
-                  <span
-                    class="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0"
-                    :style="formatBadgeStyle(file.format ?? '?')"
-                    >{{ file.format ?? '?' }}</span
-                  >
-                  <span class="flex-1 text-left text-muted-foreground text-xs truncate">
-                    <template v-if="isMultiTrackAudio && FORMAT_TO_GROUP[file.format!] === 'audio'">Audiobook</template>
-                    <template v-else>{{ formatFileSize(file.sizeBytes) }}</template>
-                  </span>
-                  <span v-if="file.role === 'primary' && !isMultiTrackAudio" class="text-[10px] text-primary font-medium shrink-0">Primary</span>
-                </button>
-              </PopoverContent>
-            </Popover>
+              </TooltipTrigger>
+              <TooltipContent>Peek</TooltipContent>
+            </Tooltip>
           </div>
-          <button
-            v-else
-            class="flex w-full items-center justify-center gap-2 h-9 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
-            :disabled="!primaryFile"
-            @click="openBook"
-          >
-            <Headphones v-if="isPrimaryAudio" class="size-4" />
-            <BookOpen v-else class="size-4" />
-            {{ isPrimaryAudio ? 'Listen' : 'Read' }}
-          </button>
 
           <div class="flex gap-2">
             <div v-if="hasPermission('library_download')" class="flex-1">
@@ -1206,7 +1293,11 @@ watch(
             >
               <Library class="size-3.5" />
             </button>
-            <Popover v-if="hasPermission('library_delete_books')" :open="moreMenuOpen" @update:open="(v) => (moreMenuOpen = v)">
+            <Popover
+              v-if="hasPermission('library_delete_books') || hasPermission('email_send')"
+              :open="moreMenuOpen"
+              @update:open="(v) => (moreMenuOpen = v)"
+            >
               <PopoverTrigger as-child>
                 <button
                   class="flex flex-1 items-center justify-center h-9 rounded-md border border-input bg-background text-sm hover:bg-muted transition-colors"
@@ -1214,8 +1305,17 @@ watch(
                   <MoreHorizontal class="size-3.5" />
                 </button>
               </PopoverTrigger>
-              <PopoverContent class="w-36 p-1" align="end">
+              <PopoverContent class="w-40 p-1" align="end">
                 <button
+                  v-if="hasPermission('email_send')"
+                  class="flex w-full items-center gap-2 px-2 py-1.5 rounded text-sm text-foreground hover:bg-muted transition-colors"
+                  @click="handleSendFromMenu"
+                >
+                  <Send class="size-3.5" />
+                  Send via Email
+                </button>
+                <button
+                  v-if="hasPermission('library_delete_books')"
                   class="flex w-full items-center gap-2 px-2 py-1.5 rounded text-sm text-destructive hover:bg-destructive/10 transition-colors"
                   @click="handleDeleteFromMenu"
                 >
@@ -1261,10 +1361,15 @@ watch(
           </div>
           <p v-if="leftColumnProgressOverflow > 0" class="text-[11px] text-muted-foreground">+{{ leftColumnProgressOverflow }} more</p>
         </div>
-        <div v-if="koboAnomaly" class="mt-2 flex items-center gap-1.5">
-          <TriangleAlert class="size-3 text-amber-500 shrink-0" />
-          <p class="text-[11px] text-amber-500">{{ koboAnomaly }}</p>
-        </div>
+        <Tooltip v-if="koboAnomaly">
+          <TooltipTrigger as-child>
+            <div class="mt-2 flex items-center gap-1.5 cursor-help" tabindex="0">
+              <TriangleAlert class="size-3 text-amber-500 shrink-0" />
+              <p class="text-[11px] text-amber-500">{{ koboAnomaly.label }}</p>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>{{ koboAnomaly.tooltip }}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
 
@@ -1287,9 +1392,17 @@ watch(
         <p v-if="book.subtitle" class="text-base text-muted-foreground mt-1 leading-snug">{{ book.subtitle }}</p>
 
         <div class="flex items-baseline flex-wrap gap-x-2 gap-y-1 mt-3">
-          <p v-if="authorLine" class="text-sm">
+          <p v-if="authorLinks.length" class="text-sm">
             <span class="text-muted-foreground">by</span>
-            <span class="ml-1 font-medium text-foreground">{{ authorLine }}</span>
+            <span class="ml-1 font-medium text-foreground">
+              <template v-for="(author, index) in authorLinks" :key="`${author.id}-${index}`">
+                <RouterLink
+                  :to="{ name: 'author-detail', params: { id: author.id } }"
+                  class="hover:text-primary hover:underline underline-offset-2 transition-colors"
+                  >{{ author.name }}</RouterLink
+                ><span v-if="index < authorLinks.length - 1">, </span>
+              </template>
+            </span>
           </p>
           <p v-if="narratorLine" class="text-sm">
             <span class="text-muted-foreground">narrated by</span>
@@ -1298,10 +1411,12 @@ watch(
           <template v-if="seriesLine">
             <span class="text-muted-foreground/60 text-xs">·</span>
             <RouterLink
-              :to="{ name: 'series-detail', params: { seriesName: book.seriesName! } }"
+              v-if="book.seriesId != null"
+              :to="{ name: 'series-detail', params: { seriesId: book.seriesId } }"
               class="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
               >{{ seriesLine }}</RouterLink
             >
+            <span v-else class="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">{{ seriesLine }}</span>
           </template>
         </div>
 
@@ -1636,10 +1751,15 @@ watch(
           </div>
           <p v-if="leftColumnProgressOverflow > 0" class="text-[11px] text-muted-foreground">+{{ leftColumnProgressOverflow }} more</p>
         </div>
-        <div v-if="koboAnomaly" class="flex items-center gap-1.5">
-          <TriangleAlert class="size-3 text-amber-500 shrink-0" />
-          <p class="text-[11px] text-amber-500">{{ koboAnomaly }}</p>
-        </div>
+        <Tooltip v-if="koboAnomaly">
+          <TooltipTrigger as-child>
+            <div class="flex items-center gap-1.5 cursor-help" tabindex="0">
+              <TriangleAlert class="size-3 text-amber-500 shrink-0" />
+              <p class="text-[11px] text-amber-500">{{ koboAnomaly.label }}</p>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>{{ koboAnomaly.tooltip }}</TooltipContent>
+        </Tooltip>
       </div>
 
       <!-- Synopsis -->
@@ -1671,6 +1791,8 @@ watch(
     @update:open="addToCollectionOpen = $event"
     @done="void loadSupplemental()"
   />
+
+  <SendBookDialog v-model:open="showSendDialog" :book-ids="[book.id]" :book-title="book.title ?? undefined" :book-files="book.files" />
 
   <DeleteBookDialog :open="deleteBookId !== null" :deleting="deletingBook" @confirm="confirmDelete" @cancel="cancelDelete" />
 

@@ -5,9 +5,12 @@ import {
   BOOK_COVER_DISPLAY_MODES,
   BOOK_SHADOW_STRENGTHS,
   BOOK_SPINE_OVERLAYS,
+  BOOK_THUMBNAIL_CLICK_ACTION,
   BOOK_VIEW_MODES,
+  CARD_INFO_MODES,
   CARD_OVERLAY_KEYS,
   COVER_SIZE_SCOPES,
+  GRID_CARD_LABEL_FIELDS,
   RADIUS_IDS,
   SERIES_CARD_COVER_MODES,
   TABLE_DENSITIES,
@@ -49,7 +52,11 @@ const DISPLAY_PREFERENCES_SCHEMA = z
     bookSpineOverlay: z.enum(BOOK_SPINE_OVERLAYS),
     bookShadowStrength: z.enum(BOOK_SHADOW_STRENGTHS),
     bookCoverDisplayMode: z.enum(BOOK_COVER_DISPLAY_MODES),
-    seriesCardCoverMode: z.enum(SERIES_CARD_COVER_MODES).default('mosaic'),
+    seriesCardCoverMode: z.enum(SERIES_CARD_COVER_MODES).default('stack'),
+    gridCardPrimaryLabel: z.enum(GRID_CARD_LABEL_FIELDS).default('hidden'),
+    gridCardSecondaryLabel: z.enum(GRID_CARD_LABEL_FIELDS).default('hidden'),
+    cardInfoMode: z.enum(CARD_INFO_MODES).default('hover-overlay'),
+    thumbnailClickAction: z.enum(BOOK_THUMBNAIL_CLICK_ACTION).default('reader'),
   })
   .strict()
   .superRefine((data, ctx) => {
