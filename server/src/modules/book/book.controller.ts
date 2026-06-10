@@ -402,6 +402,10 @@ export class BookController {
   // Flat file routes — no bookId needed since fileId is globally unique.
   // These MUST come before `:id/*` routes to avoid NestJS matching 'files' as :id.
 
+  // Media players (web audio, mobile RNTP) fire many HTTP range requests per file,
+  // which trips the global 120-req/min throttler. Streaming must skip it, matching
+  // the cover/thumbnail endpoints above.
+  @SkipThrottle()
   @Get('files/:fileId/serve')
   async serveFile(
     @Param('fileId', ParseIntPipe) fileId: number,
