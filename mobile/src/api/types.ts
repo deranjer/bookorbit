@@ -73,6 +73,54 @@ export interface BookCard {
   narrators: string[];
 }
 
+export type MetadataProviderKey =
+  | 'google'
+  | 'goodreads'
+  | 'amazon'
+  | 'hardcover'
+  | 'openLibrary'
+  | 'itunes'
+  | 'audible'
+  | 'audnexus'
+  | 'comicvine'
+  | 'ranobedb'
+  | 'kobo';
+
+export type ProviderIds = Partial<Record<MetadataProviderKey, string | null>>;
+
+export interface BookAuthorRef {
+  id: number;
+  name: string;
+  sortName: string | null;
+}
+
+// Mirrors the populated subset of the server BookDetailDto that the details page renders.
+export interface BookDetail {
+  id: number;
+  libraryId: number;
+  libraryName: string;
+  status: string;
+  addedAt: string;
+  title: string | null;
+  subtitle: string | null;
+  description: string | null;
+  isbn10: string | null;
+  isbn13: string | null;
+  publisher: string | null;
+  publishedYear: number | null;
+  language: string | null;
+  pageCount: number | null;
+  seriesId: number | null;
+  seriesName: string | null;
+  seriesIndex: number | null;
+  rating: number | null;
+  coverSource: 'extracted' | 'custom' | null;
+  providerIds: ProviderIds;
+  authors: BookAuthorRef[];
+  genres: string[];
+  tags: string[];
+}
+
 // The /books/search endpoint returns a lean cross-library shape, NOT a full BookCard.
 export interface SearchResult {
   id: number;

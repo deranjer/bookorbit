@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { coverHeaders, coverUri } from '@/src/api/client';
 import { searchBooks } from '@/src/api/books';
@@ -19,8 +20,12 @@ function useDebounce<T>(value: T, ms: number): T {
 function ResultRow({ item }: { item: SearchResult }) {
   const authorText = item.authors.length > 0 ? item.authors.join(', ') : '';
 
+  function handlePress() {
+    router.push(`/book/${item.id}`);
+  }
+
   return (
-    <View style={styles.row}>
+    <Pressable style={({ pressed }) => [styles.row, pressed && styles.rowPressed]} onPress={handlePress}>
       <Image
         style={styles.cover}
         source={{ uri: coverUri(item.id), headers: coverHeaders() }}
@@ -56,7 +61,7 @@ function ResultRow({ item }: { item: SearchResult }) {
           </View>
         ) : null}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -134,6 +139,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.border,
   },
+  rowPressed: { opacity: 0.6 },
   cover: {
     width: 44,
     height: 66,

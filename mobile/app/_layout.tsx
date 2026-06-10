@@ -21,6 +21,7 @@ export default function RootLayout() {
           <Stack.Screen name="server-setup" />
           <Stack.Screen name="login" />
           <Stack.Screen name="(drawer)" />
+          <Stack.Screen name="book/[id]" />
         </Stack>
       </QueryClientProvider>
     </AuthProvider>

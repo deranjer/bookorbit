@@ -1,5 +1,6 @@
 import { Image } from 'expo-image';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
 import { coverHeaders, coverUri } from '@/src/api/client';
 import type { BookCard as BookCardType } from '@/src/api/types';
 import { Colors } from '@/src/constants/colors';
@@ -26,8 +27,15 @@ export function BookCard({ book }: Props) {
   const authorText = book.authors.length > 0 ? book.authors.join(', ') : '';
   const progress = book.readingProgress;
 
+  function handlePress() {
+    router.push(`/book/${book.id}`);
+  }
+
   return (
-    <View style={styles.card}>
+    <Pressable
+      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      onPress={handlePress}
+    >
       {book.hasCover ? (
         <Image
           style={styles.cover}
@@ -65,7 +73,7 @@ export function BookCard({ book }: Props) {
           </Text>
         ) : null}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -76,6 +84,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     flex: 1,
     margin: 4,
+  },
+  cardPressed: {
+    opacity: 0.7,
   },
   cover: {
     width: '100%',
