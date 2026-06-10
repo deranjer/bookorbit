@@ -53,6 +53,28 @@ export interface BookFileRef {
   format: string | null;
   role: string;
   sizeBytes: number | null;
+  // Present on the book-detail file list (BookDetailDto), absent on lean card refs.
+  durationSeconds?: number | null;
+  filename?: string | null;
+}
+
+export interface AudiobookChapter {
+  title: string;
+  startMs: number;
+}
+
+export interface NarratorRef {
+  id: number;
+  name: string;
+  sortName: string | null;
+  displayOrder: number;
+}
+
+export interface AudioMetadata {
+  narrators: NarratorRef[];
+  durationSeconds: number | null;
+  abridged: boolean;
+  chapters: AudiobookChapter[] | null;
 }
 
 export interface BookCard {
@@ -71,6 +93,12 @@ export interface BookCard {
   hasCover: boolean;
   tags: string[];
   narrators: string[];
+}
+
+export interface AudioProgress {
+  currentFileId: number;
+  positionSeconds: number;
+  percentage: number;
 }
 
 export type MetadataProviderKey =
@@ -119,6 +147,8 @@ export interface BookDetail {
   authors: BookAuthorRef[];
   genres: string[];
   tags: string[];
+  files: BookFileRef[];
+  audioMetadata: AudioMetadata | null;
 }
 
 // The /books/search endpoint returns a lean cross-library shape, NOT a full BookCard.

@@ -7,6 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getBookDetail } from '@/src/api/books';
 import { coverHeaders, coverUri } from '@/src/api/client';
 import { Colors } from '@/src/constants/colors';
+import { usePlayer } from '@/src/playback/PlayerContext';
+import { isAudiobook } from '@/src/playback/queue';
 
 interface DetailRowProps {
   label: string;
@@ -26,6 +28,7 @@ export default function BookDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const bookId = Number(id);
+  const player = usePlayer();
 
   const {
     data: book,
@@ -36,6 +39,14 @@ export default function BookDetailScreen() {
     queryFn: () => getBookDetail(bookId),
     enabled: Number.isFinite(bookId),
   });
+
+  const canListen = book != null && isAudiobook(book);
+
+  async function handleListen() {
+    if (!book) return;
+    await player.loadAndPlay(book.id);
+    router.push('/player');
+  }
 
   const goodreadsId = book?.providerIds.goodreads;
 
@@ -113,6 +124,19 @@ export default function BookDetailScreen() {
               )}
             </View>
           </View>
+
+          {/* Listen (audiobooks only) */}
+          {canListen && (
+            <View style={styles.listenWrap}>
+              <Pressable
+                style={({ pressed }) => [styles.listenBtn, pressed && styles.listenBtnPressed]}
+                onPress={handleListen}
+              >
+                <Ionicons name="headset" size={20} color={Colors.bg} />
+                <Text style={styles.listenText}>Listen</Text>
+              </Pressable>
+            </View>
+          )}
 
           {/* Synopsis */}
           {book.description && (
@@ -222,6 +246,20 @@ const styles = StyleSheet.create({
   subtitle: { color: Colors.textSecondary, fontSize: 14, lineHeight: 18 },
   authors: { color: Colors.accent, fontSize: 13 },
   series: { color: Colors.textMuted, fontSize: 12, fontStyle: 'italic' },
+
+  // Listen button
+  listenWrap: { paddingHorizontal: 20, paddingTop: 20 },
+  listenBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.accent,
+    paddingVertical: 13,
+    borderRadius: 10,
+  },
+  listenBtnPressed: { opacity: 0.8 },
+  listenText: { color: Colors.bg, fontSize: 15, fontWeight: '700' },
 
   // Sections
   section: { paddingHorizontal: 20, paddingTop: 24 },

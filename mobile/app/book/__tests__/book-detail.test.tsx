@@ -14,6 +14,9 @@ jest.mock('expo-router', () => ({
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+jest.mock('@/src/playback/PlayerContext', () => ({
+  usePlayer: () => ({ loadAndPlay: jest.fn() }),
+}));
 
 const mockGetBookDetail = getBookDetail as jest.MockedFunction<typeof getBookDetail>;
 
@@ -42,6 +45,8 @@ function makeBook(overrides: Partial<BookDetail> = {}): BookDetail {
     authors: [{ id: 1, name: 'J.R.R. Tolkien', sortName: 'Tolkien, J.R.R.' }],
     genres: ['Fantasy'],
     tags: ['favorites'],
+    files: [],
+    audioMetadata: null,
     ...overrides,
   };
 }

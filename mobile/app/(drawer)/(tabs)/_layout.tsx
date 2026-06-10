@@ -1,12 +1,20 @@
 import { Tabs } from 'expo-router';
-import { Pressable, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { DrawerActions } from '@react-navigation/native';
+import { BottomTabBar } from '@react-navigation/bottom-tabs';
 import { Colors } from '@/src/constants/colors';
+import { MiniPlayer } from '@/src/components/player/MiniPlayer';
 
 export default function TabsLayout() {
   return (
     <Tabs
+      tabBar={(props) => (
+        <View>
+          <MiniPlayer />
+          <BottomTabBar {...props} />
+        </View>
+      )}
       screenOptions={({ navigation }) => ({
         tabBarStyle: { backgroundColor: Colors.bg, borderTopColor: Colors.border },
         tabBarActiveTintColor: Colors.accent,
