@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthContext } from '@/src/context/AuthContext';
 import { getPublicOidcProviders, login } from '@/src/api/auth';
-import { initiateOidcLogin } from '@/src/api/oidc';
+import { initiateOidcLogin, isOidcCancelled } from '@/src/api/oidc';
 import { Colors } from '@/src/constants/colors';
 
 export default function LoginScreen() {
@@ -53,9 +53,8 @@ export default function LoginScreen() {
       await setToken(result.accessToken, result.user);
       router.replace('/(drawer)/(tabs)');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'OIDC login failed';
-      if (!msg.includes('cancel')) {
-        setError(msg);
+      if (!isOidcCancelled(e)) {
+        setError(e instanceof Error ? e.message : 'OIDC login failed');
       }
     } finally {
       setOidcLoading('');

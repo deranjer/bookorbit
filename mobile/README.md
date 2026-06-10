@@ -2,7 +2,7 @@
 
 React Native / Expo mobile client for BookOrbit.
 
-**Screens:** server setup → login (username/password + OIDC (untested)) → dashboard, libraries, smart scopes, search.
+**Screens:** server setup → login (username/password + OIDC (unit-tested; on-device E2E pending)) → dashboard, libraries, smart scopes, search.
 
 ## Requirements
 
