@@ -3,7 +3,10 @@ import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } 
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { BookGrid } from '@/src/components/BookGrid';
+import { FilterSortSheet } from '@/src/components/FilterSortSheet';
 import { getLibraries, getLibraryBooks } from '@/src/api/libraries';
+import { buildBookQuery, countActiveFilters } from '@/src/features/library-filters/buildBookQuery';
+import { useLibraryFilterPrefs } from '@/src/features/library-filters/useLibraryFilterPrefs';
 import { PAGE_SIZE, useInfinitePage } from '@/src/lib/useInfinitePage';
 import { Colors } from '@/src/constants/colors';
 
@@ -16,10 +19,15 @@ export default function LibrariesScreen() {
   } = useQuery({ queryKey: ['libraries'], queryFn: getLibraries });
   const [activeId, setActiveId] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const selectedId = activeId ?? libraries?.[0]?.id ?? null;
   const selectedLibrary = libraries?.find((lib) => lib.id === selectedId) ?? null;
   const hasMultiple = (libraries?.length ?? 0) > 1;
+
+  const { filters, sort, apply } = useLibraryFilterPrefs(selectedId);
+  const activeFilterCount = countActiveFilters(filters);
+  const query = buildBookQuery(filters, sort, { page: 0, size: PAGE_SIZE });
 
   const {
     items: books,
@@ -29,8 +37,8 @@ export default function LibrariesScreen() {
     isFetchingNextPage,
     loadMore,
   } = useInfinitePage({
-    queryKey: ['libraryBooks', selectedId],
-    fetchPage: (page) => getLibraryBooks(selectedId!, { page, size: PAGE_SIZE }),
+    queryKey: ['libraryBooks', selectedId, query.sort, query.filter],
+    fetchPage: (page) => getLibraryBooks(selectedId!, { page, size: PAGE_SIZE, sort: query.sort, filter: query.filter }),
     enabled: selectedId !== null,
   });
 
@@ -58,24 +66,40 @@ export default function LibrariesScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Current library + dropdown selector */}
-      <Pressable
-        style={styles.header}
-        onPress={() => hasMultiple && setPickerOpen(true)}
-        disabled={!hasMultiple}
-      >
-        <View style={styles.headerTextWrap}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {selectedLibrary?.name ?? 'Library'}
-          </Text>
-          {bookCount !== null && (
-            <Text style={styles.headerCount}>
-              {bookCount} {bookCount === 1 ? 'book' : 'books'}
+      {/* Current library + dropdown selector + filter trigger */}
+      <View style={styles.header}>
+        <Pressable
+          style={styles.headerSelector}
+          onPress={() => hasMultiple && setPickerOpen(true)}
+          disabled={!hasMultiple}
+        >
+          <View style={styles.headerTextWrap}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {selectedLibrary?.name ?? 'Library'}
             </Text>
+            {bookCount !== null && (
+              <Text style={styles.headerCount}>
+                {bookCount} {bookCount === 1 ? 'book' : 'books'}
+              </Text>
+            )}
+          </View>
+          {hasMultiple && <Ionicons name="chevron-down" size={20} color={Colors.textSecondary} />}
+        </Pressable>
+
+        <Pressable
+          style={styles.filterButton}
+          onPress={() => setSheetOpen(true)}
+          disabled={selectedId === null}
+          hitSlop={8}
+        >
+          <Ionicons name="options-outline" size={22} color={Colors.text} />
+          {activeFilterCount > 0 && (
+            <View style={styles.filterBadge}>
+              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+            </View>
           )}
-        </View>
-        {hasMultiple && <Ionicons name="chevron-down" size={20} color={Colors.textSecondary} />}
-      </Pressable>
+        </Pressable>
+      </View>
 
       <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setPickerOpen(false)}>
@@ -99,6 +123,14 @@ export default function LibrariesScreen() {
         </Pressable>
       </Modal>
 
+      <FilterSortSheet
+        visible={sheetOpen}
+        filters={filters}
+        sort={sort}
+        onClose={() => setSheetOpen(false)}
+        onApply={apply}
+      />
+
       <BookGrid
         books={books}
         refreshing={(isFetching && !isFetchingNextPage) || librariesFetching}
@@ -120,12 +152,27 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  headerSelector: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  filterButton: { padding: 4 },
+  filterBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterBadgeText: { color: '#ffffff', fontSize: 10, fontWeight: '700' },
   headerTextWrap: { flex: 1 },
   headerTitle: { color: Colors.text, fontSize: 18, fontWeight: '700' },
   headerCount: { color: Colors.textSecondary, fontSize: 13, marginTop: 2 },

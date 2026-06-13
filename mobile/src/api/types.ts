@@ -238,8 +238,79 @@ export interface SetupStatus {
   needsSetup: boolean;
 }
 
+// Lean mirrors of @bookorbit/types query shapes. Mobile only uses the curated
+// subset of fields/operators the Filter & Sort sheet can emit, but the wire
+// types stay loose (string) so we never block on porting the full union.
+export type ReadStatus =
+  | 'unread'
+  | 'want_to_read'
+  | 'reading'
+  | 'on_hold'
+  | 'rereading'
+  | 'read'
+  | 'skimmed'
+  | 'abandoned';
+
+export type SortField =
+  | 'title'
+  | 'author'
+  | 'series'
+  | 'seriesIndex'
+  | 'addedAt'
+  | 'updatedAt'
+  | 'publishedYear'
+  | 'pageCount'
+  | 'rating'
+  | 'readProgress'
+  | 'readStatus'
+  | 'lastReadAt'
+  | 'random';
+
+export type RuleField =
+  | 'readStatus'
+  | 'readProgress'
+  | 'format'
+  | 'fileAvailability'
+  | 'author'
+  | 'genre'
+  | 'tag'
+  | 'language'
+  | 'rating'
+  | 'publishedYear';
+
+export type RuleOperator =
+  | 'includesAny'
+  | 'gte'
+  | 'lte'
+  | 'between'
+  | 'isUnread'
+  | 'isInProgress'
+  | 'isFinished'
+  | 'isPresent'
+  | 'isMissing';
+
+export interface Rule {
+  type: 'rule';
+  field: RuleField;
+  operator: RuleOperator;
+  value?: string | number | string[] | number[];
+  valueTo?: string | number;
+}
+
+export interface GroupRule {
+  type: 'group';
+  join: 'AND' | 'OR';
+  rules: (Rule | GroupRule)[];
+}
+
+export interface SortSpec {
+  field: SortField;
+  dir: 'asc' | 'desc';
+}
+
 export interface BookQuery {
-  sort: { field: string; dir: 'asc' | 'desc' }[];
+  sort: SortSpec[];
   pagination: { page: number; size: number };
+  filter?: GroupRule;
   q?: string;
 }
