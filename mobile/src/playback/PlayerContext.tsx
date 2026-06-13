@@ -1,10 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import TrackPlayer, { State } from 'react-native-track-player';
-import type { BookDetail, BookFileRef } from '@/src/api/types';
+import { addNetworkStateListener } from 'expo-network';
+import TrackPlayer, { State, type Track } from 'react-native-track-player';
+import type { AudioProgress, BookDetail, BookFileRef } from '@/src/api/types';
 import { getAudioProgress, getBookDetail } from '@/src/api/books';
 import { tokenStore } from '@/src/auth/tokenStore';
 import { serverUrlStore } from '@/src/auth/serverUrlStore';
+import { getDownload } from '@/src/downloads/store';
 import {
   audioFiles,
   buildTracks,
@@ -14,6 +16,7 @@ import {
   totalDurationSec,
   type ResolvedChapter,
 } from './queue';
+import { flushPendingProgress, getLocalProgress } from './offlineProgress';
 import { applyOptions, ensurePlayerSetup } from './setup';
 import { usePlaybackStatus } from './usePlaybackStatus';
 import {
@@ -40,6 +43,7 @@ interface PlayerContextValue {
   skipForwardSeconds: number;
   // Actions
   loadAndPlay: (bookId: number) => Promise<void>;
+  stop: () => Promise<void>;
   togglePlay: () => Promise<void>;
   skipBack: () => Promise<void>;
   skipForward: () => Promise<void>;
@@ -50,6 +54,17 @@ interface PlayerContextValue {
 }
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
+
+/**
+ * Choose the resume position: the local copy when it hasn't synced yet (it's at
+ * least as new as the server) or the server is unreachable; otherwise the server's.
+ */
+async function resolveResumeProgress(bookId: number): Promise<AudioProgress | null> {
+  const server = await getAudioProgress(bookId).catch(() => null);
+  const local = await getLocalProgress(bookId).catch(() => null);
+  if (local && (local.dirty || !server)) return local;
+  return server;
+}
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
@@ -71,6 +86,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Drain any queued offline progress on startup and whenever connectivity returns.
+  useEffect(() => {
+    void flushPendingProgress();
+    const sub = addNetworkStateListener(({ isConnected, isInternetReachable }) => {
+      if (isConnected && isInternetReachable !== false) void flushPendingProgress();
+    });
+    return () => sub.remove();
+  }, []);
+
   const files = useMemo(() => (currentBook ? audioFiles(currentBook) : []), [currentBook]);
   const chapters = useMemo(
     () => resolveChapters(currentBook?.audioMetadata?.chapters),
@@ -81,18 +105,35 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const loadAndPlay = useCallback(
     async (bookId: number) => {
       await ensurePlayerSetup();
-      const book = await queryClient.fetchQuery({
-        queryKey: ['book', bookId],
-        queryFn: () => getBookDetail(bookId),
-      });
-      if (!isAudiobook(book)) return;
 
-      const tracks = buildTracks(book, {
-        baseUrl: serverUrlStore.get() ?? '',
-        token: tokenStore.get(),
-      });
+      // Prefer an on-device copy: it plays offline and supplies lock-screen artwork.
+      const download = await getDownload(bookId).catch(() => null);
+
+      let book: BookDetail;
+      let tracks: Track[];
+      if (download) {
+        book = download.book;
+        if (!isAudiobook(book)) return;
+        tracks = buildTracks(book, {
+          baseUrl: serverUrlStore.get() ?? '',
+          token: tokenStore.get(),
+          localFiles: new Map(download.files.map((f) => [f.id, f.localUri])),
+          artwork: download.coverLocalUri ?? undefined,
+        });
+      } else {
+        book = await queryClient.fetchQuery({
+          queryKey: ['book', bookId],
+          queryFn: () => getBookDetail(bookId),
+        });
+        if (!isAudiobook(book)) return;
+        tracks = buildTracks(book, {
+          baseUrl: serverUrlStore.get() ?? '',
+          token: tokenStore.get(),
+        });
+      }
+
       const bookFiles = audioFiles(book);
-      const progress = await getAudioProgress(bookId).catch(() => null);
+      const progress = await resolveResumeProgress(bookId);
 
       await TrackPlayer.reset();
       await TrackPlayer.add(tracks);
@@ -109,6 +150,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     },
     [queryClient],
   );
+
+  const stop = useCallback(async () => {
+    await TrackPlayer.reset().catch(() => {});
+    setCurrentBook(null);
+  }, []);
 
   const togglePlay = useCallback(async () => {
     const state = (await TrackPlayer.getPlaybackState()).state;
@@ -180,6 +226,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       skipBackSeconds: settings.skipBackSeconds,
       skipForwardSeconds: settings.skipForwardSeconds,
       loadAndPlay,
+      stop,
       togglePlay,
       skipBack,
       skipForward,
@@ -197,6 +244,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       isBuffering,
       settings,
       loadAndPlay,
+      stop,
       togglePlay,
       skipBack,
       skipForward,

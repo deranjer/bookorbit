@@ -12,6 +12,7 @@ import { Colors } from '@/src/constants/colors';
 const NAV_ITEMS = [
   { label: 'Authors', icon: 'people-outline', href: '/(drawer)/(tabs)/authors' },
   { label: 'Series', icon: 'albums-outline', href: '/(drawer)/(tabs)/series' },
+  { label: 'Downloads', icon: 'download-outline', href: '/(drawer)/(tabs)/downloads' },
 ] as const;
 
 function DrawerContent(props: DrawerContentComponentProps) {

@@ -4,6 +4,7 @@ import { Event, State, useTrackPlayerEvents } from 'react-native-track-player';
 import type { BookDetail, BookFileRef } from '@/src/api/types';
 import { saveAudioProgress } from '@/src/api/books';
 import { PROGRESS_SAVE_THROTTLE_MS } from './constants';
+import { flushPendingProgress, markSynced, saveLocalProgress } from './offlineProgress';
 import { audioFiles, percentageFor } from './queue';
 
 interface PendingSave {
@@ -37,15 +38,19 @@ export function useProgressSync(book: BookDetail | null): void {
     if (!pending) return;
     pendingRef.current = null;
     lastSavedRef.current = Date.now();
+    const body = {
+      percentage: pending.percentage,
+      currentFileId: pending.currentFileId,
+      positionSeconds: pending.positionSeconds,
+    };
+    // Always record locally first so the position survives offline + app restart.
+    await saveLocalProgress(pending.bookId, body).catch(() => {});
     try {
-      await saveAudioProgress(pending.bookId, {
-        percentage: pending.percentage,
-        currentFileId: pending.currentFileId,
-        positionSeconds: pending.positionSeconds,
-      });
+      await saveAudioProgress(pending.bookId, body);
+      await markSynced(pending.bookId).catch(() => {});
     } catch {
-      // Keep the pending value so the next tick retries.
-      pendingRef.current = pending;
+      // Server unreachable: the local copy stays dirty and is flushed on
+      // reconnect/foreground. No need to re-queue in pendingRef.
     }
   }, []);
 
@@ -77,7 +82,12 @@ export function useProgressSync(book: BookDetail | null): void {
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'background' || next === 'inactive') void flush();
+      if (next === 'background' || next === 'inactive') {
+        void flush();
+      } else if (next === 'active') {
+        // Returning to the app is a good moment to drain any queued offline saves.
+        void flushPendingProgress();
+      }
     });
     return () => {
       sub.remove();

@@ -72,6 +72,7 @@ export default function TabsLayout() {
           rendered inside the tab navigator so the bottom bar stays visible. */}
       <Tabs.Screen name="authors" options={{ title: 'Authors', href: null }} />
       <Tabs.Screen name="series" options={{ title: 'Series', href: null }} />
+      <Tabs.Screen name="downloads" options={{ title: 'Downloads', href: null }} />
     </Tabs>
   );
 }

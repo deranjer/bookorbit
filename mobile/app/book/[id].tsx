@@ -1,12 +1,15 @@
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
+import * as Sharing from 'expo-sharing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getBookDetail } from '@/src/api/books';
 import { coverHeaders, coverUri } from '@/src/api/client';
 import { Colors } from '@/src/constants/colors';
+import { useDownloads } from '@/src/downloads/DownloadsContext';
+import { isOpenableEbook } from '@/src/downloads/select';
 import { usePlayer } from '@/src/playback/PlayerContext';
 import { isAudiobook } from '@/src/playback/queue';
 
@@ -29,6 +32,7 @@ export default function BookDetailScreen() {
   const insets = useSafeAreaInsets();
   const bookId = Number(id);
   const player = usePlayer();
+  const { isDownloaded, isDownloading, progressFor, startDownload, removeDownload, getDownload } = useDownloads();
 
   const {
     data: book,
@@ -41,11 +45,47 @@ export default function BookDetailScreen() {
   });
 
   const canListen = book != null && isAudiobook(book);
+  const downloaded = book != null && isDownloaded(book.id);
+  const downloading = book != null && isDownloading(book.id);
+  const downloadProgress = book != null ? progressFor(book.id) : undefined;
 
   async function handleListen() {
     if (!book) return;
     await player.loadAndPlay(book.id);
     router.push('/player');
+  }
+
+  function handleDownload() {
+    if (!book) return;
+    void startDownload(book);
+  }
+
+  function handleRemove() {
+    if (!book) return;
+    Alert.alert('Delete download', `Remove "${book.title ?? 'this book'}" from this device?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            if (player.currentBook?.id === book.id) await player.stop();
+            await removeDownload(book.id);
+          })();
+        },
+      },
+    ]);
+  }
+
+  async function handleOpen() {
+    if (!book) return;
+    const file = getDownload(book.id)?.files[0];
+    if (!file) return;
+    if (!isOpenableEbook(file.format) || !(await Sharing.isAvailableAsync())) {
+      Alert.alert('Cannot open', 'No app is available to open this file on your device.');
+      return;
+    }
+    await Sharing.shareAsync(file.localUri).catch(() => {});
   }
 
   const goodreadsId = book?.providerIds.goodreads;
@@ -125,9 +165,9 @@ export default function BookDetailScreen() {
             </View>
           </View>
 
-          {/* Listen (audiobooks only) */}
-          {canListen && (
-            <View style={styles.listenWrap}>
+          {/* Actions: Listen (audiobooks) + Download/Open/Remove (all books) */}
+          <View style={styles.actions}>
+            {canListen && (
               <Pressable
                 style={({ pressed }) => [styles.listenBtn, pressed && styles.listenBtnPressed]}
                 onPress={handleListen}
@@ -135,8 +175,48 @@ export default function BookDetailScreen() {
                 <Ionicons name="headset" size={20} color={Colors.bg} />
                 <Text style={styles.listenText}>Listen</Text>
               </Pressable>
-            </View>
-          )}
+            )}
+
+            {downloaded ? (
+              <View style={styles.downloadedRow}>
+                <View style={styles.downloadedBadge}>
+                  <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
+                  <Text style={styles.downloadedText}>Downloaded</Text>
+                </View>
+                {!canListen && (
+                  <Pressable
+                    style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
+                    onPress={handleOpen}
+                  >
+                    <Ionicons name="open-outline" size={18} color={Colors.accent} />
+                    <Text style={styles.secondaryText}>Open</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
+                  onPress={handleRemove}
+                >
+                  <Ionicons name="trash-outline" size={18} color={Colors.error} />
+                  <Text style={[styles.secondaryText, { color: Colors.error }]}>Remove</Text>
+                </Pressable>
+              </View>
+            ) : downloading ? (
+              <View style={[styles.secondaryBtn, styles.downloadingBtn]}>
+                <ActivityIndicator size="small" color={Colors.accent} />
+                <Text style={styles.secondaryText}>
+                  {downloadProgress != null ? `Downloading ${Math.round(downloadProgress * 100)}%` : 'Downloading…'}
+                </Text>
+              </View>
+            ) : (
+              <Pressable
+                style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
+                onPress={handleDownload}
+              >
+                <Ionicons name="cloud-download-outline" size={18} color={Colors.accent} />
+                <Text style={styles.secondaryText}>Download</Text>
+              </Pressable>
+            )}
+          </View>
 
           {/* Synopsis */}
           {book.description && (
@@ -247,8 +327,8 @@ const styles = StyleSheet.create({
   authors: { color: Colors.accent, fontSize: 13 },
   series: { color: Colors.textMuted, fontSize: 12, fontStyle: 'italic' },
 
-  // Listen button
-  listenWrap: { paddingHorizontal: 20, paddingTop: 20 },
+  // Actions
+  actions: { paddingHorizontal: 20, paddingTop: 20, gap: 12 },
   listenBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -260,6 +340,22 @@ const styles = StyleSheet.create({
   },
   listenBtnPressed: { opacity: 0.8 },
   listenText: { color: Colors.bg, fontSize: 15, fontWeight: '700' },
+  btnPressed: { opacity: 0.6 },
+  secondaryBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.surface,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  secondaryText: { color: Colors.accent, fontSize: 14, fontWeight: '600' },
+  downloadingBtn: { opacity: 0.9 },
+  downloadedRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  downloadedBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 12, flex: 1, justifyContent: 'center' },
+  downloadedText: { color: Colors.success, fontSize: 14, fontWeight: '600' },
 
   // Sections
   section: { paddingHorizontal: 20, paddingTop: 24 },

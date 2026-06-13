@@ -102,6 +102,28 @@ describe('buildTracks', () => {
     const [track] = buildTracks(b, { baseUrl: 'http://host', token: null });
     expect(track!.headers).toBeUndefined();
   });
+
+  it('uses local file uris (no auth header) and attaches artwork when downloaded', () => {
+    const b = book({ files: [file(2, 'mp3', 60), file(4, 'm4b', 120)] });
+    const tracks = buildTracks(b, {
+      baseUrl: 'http://host',
+      token: 'tok',
+      localFiles: new Map([[2, 'file:///downloads/7/2.mp3']]),
+      artwork: 'file:///downloads/7/cover.jpg',
+    });
+    // File 2 is downloaded: local uri, no headers, artwork attached.
+    expect(tracks[0]).toMatchObject({
+      url: 'file:///downloads/7/2.mp3',
+      artwork: 'file:///downloads/7/cover.jpg',
+    });
+    expect(tracks[0]!.headers).toBeUndefined();
+    // File 4 is not in the local map: falls back to streaming with auth headers, no artwork.
+    expect(tracks[1]).toMatchObject({
+      url: 'http://host/api/v1/books/files/4/serve',
+      headers: { Authorization: 'Bearer tok' },
+    });
+    expect(tracks[1]!.artwork).toBeUndefined();
+  });
 });
 
 describe('whole-book offset math', () => {

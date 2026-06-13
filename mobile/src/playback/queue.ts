@@ -34,29 +34,37 @@ export function performerLabel(book: Pick<BookDetail, 'audioMetadata' | 'authors
 export interface BuildTracksParams {
   baseUrl: string;
   token: string | null;
+  /** Map of fileId → local `file://` uri for downloaded books. */
+  localFiles?: Map<number, string>;
+  /** Local cover uri used for lock-screen artwork (only safe for local files). */
+  artwork?: string;
 }
 
 /**
  * Map a book's audio files to RNTP tracks. Each file is one track; RNTP manages the
  * full queue natively (skipToNext/Previous advance between files).
  *
- * Note: `artwork` is intentionally omitted. The cover endpoint requires the JWT, but
- * RNTP's native image loader cannot send auth headers for artwork, so a lock-screen
- * thumbnail would 401. The in-app UI renders the cover via expo-image with auth
- * headers. Caching the cover to a local file for lock-screen art is a follow-up.
+ * When a `localFiles` entry exists for a file, the track streams from the on-device
+ * copy (no auth header needed) and `artwork` is attached — RNTP's native image loader
+ * can render a local cover for the lock screen, unlike the JWT-protected remote cover
+ * endpoint, which it cannot send headers for.
  */
-export function buildTracks(book: BookDetail, { baseUrl, token }: BuildTracksParams): Track[] {
+export function buildTracks(book: BookDetail, { baseUrl, token, localFiles, artwork }: BuildTracksParams): Track[] {
   const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
   const artist = performerLabel(book);
   const files = audioFiles(book);
-  return files.map((f) => ({
-    id: String(f.id),
-    url: `${baseUrl}/api/v1/books/files/${f.id}/serve`,
-    headers,
-    title: book.title ?? stripExtension(f.filename) ?? 'Audiobook',
-    artist,
-    duration: f.durationSeconds ?? undefined,
-  }));
+  return files.map((f) => {
+    const localUri = localFiles?.get(f.id);
+    return {
+      id: String(f.id),
+      url: localUri ?? `${baseUrl}/api/v1/books/files/${f.id}/serve`,
+      headers: localUri ? undefined : headers,
+      title: book.title ?? stripExtension(f.filename) ?? 'Audiobook',
+      artist,
+      artwork: localUri ? artwork : undefined,
+      duration: f.durationSeconds ?? undefined,
+    };
+  });
 }
 
 function stripExtension(name: string | null | undefined): string | null {

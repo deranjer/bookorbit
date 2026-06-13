@@ -15,7 +15,18 @@ jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 jest.mock('@/src/playback/PlayerContext', () => ({
-  usePlayer: () => ({ loadAndPlay: jest.fn() }),
+  usePlayer: () => ({ loadAndPlay: jest.fn(), stop: jest.fn(), currentBook: null }),
+}));
+jest.mock('expo-sharing', () => ({ isAvailableAsync: jest.fn(), shareAsync: jest.fn() }));
+jest.mock('@/src/downloads/DownloadsContext', () => ({
+  useDownloads: () => ({
+    isDownloaded: () => false,
+    isDownloading: () => false,
+    progressFor: () => undefined,
+    startDownload: jest.fn(),
+    removeDownload: jest.fn(),
+    getDownload: () => undefined,
+  }),
 }));
 
 const mockGetBookDetail = getBookDetail as jest.MockedFunction<typeof getBookDetail>;
