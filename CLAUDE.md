@@ -100,6 +100,16 @@ Imported as `@bookorbit/types` by both client and server. Never duplicate types 
 
 - **No emoji as icons.** Never use emoji (e.g. 🙈, 👁) as icons or UI affordances unless a task explicitly asks for it. Use `Ionicons` from `@expo/vector-icons` (the icon set already used throughout the app).
 
+#### Ebook reader (foliate.js in a WebView)
+
+The mobile reader (`mobile/src/reader/`, screen `mobile/app/reader/[id].tsx`) renders ebooks (EPUB, MOBI/AZW3, FB2, CBZ/CBR — **not** PDF) by running the **same foliate.js engine the web client uses**, inside a `react-native-webview`. This is what gives parity, including identical EPUB CFI strings so reading position syncs with the web client and Kobo.
+
+- **Foliate is vendored, not a package.** The web client serves foliate from `client/public/assets/foliate/`. The mobile app ships its **own copy** of those files under `mobile/assets/reader/foliate/`. **These are duplicates: any update to the web client's foliate assets must be re-copied into the mobile app**, and `READER_ASSET_VERSION` in `mobile/src/reader/assets.ts` must be bumped so existing installs re-extract the new files. (Despite the file living under the web client, both are just static foliate builds — the server does not serve foliate to mobile.)
+- **`.txt` suffix is deliberate.** Metro treats `.js` as source, so reader assets (foliate + `index.html` + `bridge.js`) are stored as `*.txt` and `metro.config.js` registers `txt` as an asset extension. `assets.ts` copies them to `documentDirectory/reader/` at first launch, stripping `.txt`.
+- **RN owns all networking; the WebView only sees local `file://`.** `source.ts` resolves a book to a local file (offline download, else a cached fetch of `/books/files/:id/serve`), and bytes are streamed into the WebView as base64 chunks. Do not make the WebView call the server.
+- **Three theme tables must stay in sync** when changing reader themes: web `client/src/features/reader/epub/constants/themes.ts`, the `THEMES`/`generateCSS` block in `mobile/assets/reader/bridge.js.txt` (the actual rendering CSS, ported from the web `useReaderState.ts`), and `mobile/src/reader/themes.ts` (the settings-UI swatches).
+- Progress sync mirrors the audiobook player's offline pattern (local-first write + dirty flag + flush on reconnect); see `mobile/src/reader/offlineProgress.ts`.
+
 ### Database
 
 Before production launch (current phase): migrations are rebased into a single `0000_*.sql`. When adding schema changes, regenerate from scratch:

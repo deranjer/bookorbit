@@ -101,6 +101,21 @@ export interface AudioProgress {
   percentage: number;
 }
 
+// Per-file reading position for the ebook reader. The server stores a richer shape
+// (page number, Kobo/KOReader fields); mobile only reads/writes the CFI + percentage
+// the foliate reader needs.
+export interface FileProgress {
+  cfi: string | null;
+  percentage: number;
+  pageNumber: number | null;
+  updatedAt?: string | null;
+}
+
+export interface SaveFileProgress {
+  cfi?: string | null;
+  percentage: number;
+}
+
 export type MetadataProviderKey =
   | 'google'
   | 'goodreads'

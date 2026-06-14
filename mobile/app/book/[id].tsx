@@ -17,7 +17,7 @@ import { RecommendationScroller } from '@/src/components/book-detail/Recommendat
 import { StarRating } from '@/src/components/book-detail/StarRating';
 import { readStatusMeta } from '@/src/components/book-detail/readStatus';
 import { useDownloads } from '@/src/downloads/DownloadsContext';
-import { isOpenableEbook } from '@/src/downloads/select';
+import { isOpenableEbook, isReadable } from '@/src/downloads/select';
 import { usePlayer } from '@/src/playback/PlayerContext';
 import { isAudiobook } from '@/src/playback/queue';
 
@@ -96,6 +96,7 @@ export default function BookDetailScreen() {
   }
 
   const canListen = book != null && isAudiobook(book);
+  const canRead = book != null && isReadable(book);
   const downloaded = book != null && isDownloaded(book.id);
   const downloading = book != null && isDownloading(book.id);
   const downloadProgress = book != null ? progressFor(book.id) : undefined;
@@ -104,6 +105,11 @@ export default function BookDetailScreen() {
     if (!book) return;
     await player.loadAndPlay(book.id);
     router.push('/player');
+  }
+
+  function handleRead() {
+    if (!book) return;
+    router.push(`/reader/${book.id}`);
   }
 
   function handleDownload() {
@@ -227,13 +233,23 @@ export default function BookDetailScreen() {
               </Pressable>
             )}
 
+            {canRead && (
+              <Pressable
+                style={({ pressed }) => [styles.listenBtn, pressed && styles.listenBtnPressed]}
+                onPress={handleRead}
+              >
+                <Ionicons name="book" size={20} color={Colors.bg} />
+                <Text style={styles.listenText}>Read</Text>
+              </Pressable>
+            )}
+
             {downloaded ? (
               <View style={styles.downloadedRow}>
                 <View style={styles.downloadedBadge}>
                   <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
                   <Text style={styles.downloadedText}>Downloaded</Text>
                 </View>
-                {!canListen && (
+                {!canListen && !canRead && (
                   <Pressable
                     style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
                     onPress={handleOpen}

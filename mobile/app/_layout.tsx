@@ -26,6 +26,7 @@ export default function RootLayout() {
               <Stack.Screen name="login" />
               <Stack.Screen name="(drawer)" />
               <Stack.Screen name="book/[id]" />
+              <Stack.Screen name="reader/[id]" options={{ animation: 'fade' }} />
               <Stack.Screen name="player" options={{ presentation: 'modal' }} />
             </Stack>
           </PlayerProvider>
