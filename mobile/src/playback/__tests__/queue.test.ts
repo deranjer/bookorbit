@@ -42,6 +42,8 @@ function book(overrides: Partial<BookDetail> = {}): BookDetail {
     genres: [],
     tags: [],
     files: [],
+    readStatus: null,
+    collections: [],
     audioMetadata: null,
     ...overrides,
   };

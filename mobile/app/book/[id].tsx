@@ -1,17 +1,28 @@
+import { useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getBookDetail } from '@/src/api/books';
+import { getAuthorBooks, getBookDetail, getRecommendations, setRating, setReadStatus } from '@/src/api/books';
 import { coverHeaders, coverUri } from '@/src/api/client';
+import { useAuthContext } from '@/src/context/AuthContext';
+import type { ReadStatus } from '@/src/api/types';
 import { Colors } from '@/src/constants/colors';
+import { CollectionPickerSheet } from '@/src/components/book-detail/CollectionPickerSheet';
+import { ReadStatusSheet } from '@/src/components/book-detail/ReadStatusSheet';
+import { RecommendationScroller } from '@/src/components/book-detail/RecommendationScroller';
+import { StarRating } from '@/src/components/book-detail/StarRating';
+import { readStatusMeta } from '@/src/components/book-detail/readStatus';
 import { useDownloads } from '@/src/downloads/DownloadsContext';
 import { isOpenableEbook } from '@/src/downloads/select';
 import { usePlayer } from '@/src/playback/PlayerContext';
 import { isAudiobook } from '@/src/playback/queue';
+
+// Server gates the shared rating field behind library_edit_metadata.
+const EDIT_METADATA_PERMISSION = 'library_edit_metadata';
 
 interface DetailRowProps {
   label: string;
@@ -32,7 +43,12 @@ export default function BookDetailScreen() {
   const insets = useSafeAreaInsets();
   const bookId = Number(id);
   const player = usePlayer();
+  const queryClient = useQueryClient();
+  const { user } = useAuthContext();
   const { isDownloaded, isDownloading, progressFor, startDownload, removeDownload, getDownload } = useDownloads();
+
+  const [statusSheetOpen, setStatusSheetOpen] = useState(false);
+  const [collectionSheetOpen, setCollectionSheetOpen] = useState(false);
 
   const {
     data: book,
@@ -43,6 +59,41 @@ export default function BookDetailScreen() {
     queryFn: () => getBookDetail(bookId),
     enabled: Number.isFinite(bookId),
   });
+
+  const { data: authorBooks } = useQuery({
+    queryKey: ['book', bookId, 'author-books'],
+    queryFn: () => getAuthorBooks(bookId),
+    enabled: Number.isFinite(bookId),
+  });
+
+  const { data: recommendations } = useQuery({
+    queryKey: ['book', bookId, 'recommendations'],
+    queryFn: () => getRecommendations(bookId),
+    enabled: Number.isFinite(bookId),
+  });
+
+  const canRate = user?.isSuperuser === true || user?.permissions?.includes(EDIT_METADATA_PERMISSION) === true;
+
+  const statusMutation = useMutation({
+    mutationFn: (status: ReadStatus) => setReadStatus(bookId, status),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['book', bookId] });
+    },
+    onError: () => Alert.alert('Could not update status', 'Please try again.'),
+  });
+
+  const ratingMutation = useMutation({
+    mutationFn: (rating: number | null) => setRating(bookId, rating),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['book', bookId] });
+    },
+    onError: () => Alert.alert('Could not update rating', 'Please try again.'),
+  });
+
+  function handleSelectStatus(status: ReadStatus) {
+    setStatusSheetOpen(false);
+    statusMutation.mutate(status);
+  }
 
   const canListen = book != null && isAudiobook(book);
   const downloaded = book != null && isDownloaded(book.id);
@@ -104,7 +155,6 @@ export default function BookDetailScreen() {
       book.publishedYear != null ||
       book.isbn13 != null ||
       book.isbn10 != null ||
-      book.rating != null ||
       book.libraryName != null);
 
   return (
@@ -218,6 +268,70 @@ export default function BookDetailScreen() {
             )}
           </View>
 
+          {/* Your shelf: reading status, rating, collections */}
+          <View style={styles.shelf}>
+            <Pressable
+              style={({ pressed }) => [styles.statusBtn, pressed && styles.btnPressed]}
+              onPress={() => setStatusSheetOpen(true)}
+            >
+              {book.readStatus ? (
+                <>
+                  <Ionicons
+                    name={readStatusMeta(book.readStatus.status).icon}
+                    size={20}
+                    color={readStatusMeta(book.readStatus.status).color}
+                  />
+                  <Text style={styles.statusText}>{readStatusMeta(book.readStatus.status).label}</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="book-outline" size={20} color={Colors.textSecondary} />
+                  <Text style={[styles.statusText, { color: Colors.textSecondary }]}>Set reading status</Text>
+                </>
+              )}
+              {statusMutation.isPending ? (
+                <ActivityIndicator size="small" color={Colors.accent} style={styles.statusChevron} />
+              ) : (
+                <Ionicons name="chevron-down" size={16} color={Colors.textMuted} style={styles.statusChevron} />
+              )}
+            </Pressable>
+
+            {(canRate || book.rating != null) && (
+              <View style={styles.ratingRow}>
+                <Text style={styles.ratingLabel}>Rating</Text>
+                <StarRating
+                  value={book.rating}
+                  onChange={canRate ? (r) => ratingMutation.mutate(r) : undefined}
+                  disabled={ratingMutation.isPending}
+                  size={28}
+                />
+              </View>
+            )}
+
+            <Pressable
+              style={({ pressed }) => [styles.collectionBtn, pressed && styles.btnPressed]}
+              onPress={() => setCollectionSheetOpen(true)}
+            >
+              <Ionicons name="albums-outline" size={18} color={Colors.accent} />
+              <Text style={styles.collectionBtnText}>
+                {book.collections.length > 0
+                  ? `In ${book.collections.length} collection${book.collections.length === 1 ? '' : 's'}`
+                  : 'Add to collection'}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+            </Pressable>
+
+            {book.collections.length > 0 && (
+              <View style={styles.chips}>
+                {book.collections.map((c) => (
+                  <View key={c.id} style={[styles.chip, styles.chipAlt]}>
+                    <Text style={styles.chipText}>{c.name}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
           {/* Synopsis */}
           {book.description && (
             <View style={styles.section}>
@@ -237,7 +351,6 @@ export default function BookDetailScreen() {
                 {book.publishedYear != null && <DetailRow label="Published" value={book.publishedYear.toString()} />}
                 {book.isbn13 && <DetailRow label="ISBN-13" value={book.isbn13} />}
                 {book.isbn10 && <DetailRow label="ISBN-10" value={book.isbn10} />}
-                {book.rating != null && <DetailRow label="Rating" value={`${book.rating.toFixed(1)} ★`} />}
                 {book.libraryName && <DetailRow label="Library" value={book.libraryName} />}
               </View>
             </View>
@@ -285,8 +398,26 @@ export default function BookDetailScreen() {
             </View>
           )}
 
+          {/* By Author & Similar Books */}
+          {authorBooks && authorBooks.length > 0 && <RecommendationScroller title="More by this Author" books={authorBooks} />}
+          {recommendations && recommendations.length > 0 && (
+            <RecommendationScroller title="Similar Books" books={recommendations} />
+          )}
+
           <View style={styles.bottomPad} />
         </ScrollView>
+      )}
+
+      {book && (
+        <>
+          <ReadStatusSheet
+            visible={statusSheetOpen}
+            current={book.readStatus?.status ?? null}
+            onSelect={handleSelectStatus}
+            onClose={() => setStatusSheetOpen(false)}
+          />
+          <CollectionPickerSheet visible={collectionSheetOpen} bookId={book.id} onClose={() => setCollectionSheetOpen(false)} />
+        </>
       )}
     </View>
   );
@@ -356,6 +487,40 @@ const styles = StyleSheet.create({
   downloadedRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   downloadedBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 12, flex: 1, justifyContent: 'center' },
   downloadedText: { color: Colors.success, fontSize: 14, fontWeight: '600' },
+
+  // Shelf (status, rating, collections)
+  shelf: { paddingHorizontal: 20, paddingTop: 16, gap: 12 },
+  statusBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  statusText: { color: Colors.text, fontSize: 15, fontWeight: '600' },
+  statusChevron: { marginLeft: 'auto' },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: Colors.surface,
+    borderRadius: 10,
+  },
+  ratingLabel: { color: Colors.textSecondary, fontSize: 14, fontWeight: '600' },
+  collectionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  collectionBtnText: { color: Colors.text, fontSize: 15, fontWeight: '600', flex: 1 },
 
   // Sections
   section: { paddingHorizontal: 20, paddingTop: 24 },

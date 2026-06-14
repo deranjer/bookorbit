@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, waitFor } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
 import BookDetailScreen from '../[id]';
-import { getBookDetail } from '@/src/api/books';
+import { getAuthorBooks, getBookDetail, getRecommendations } from '@/src/api/books';
 import type { BookDetail } from '@/src/api/types';
 
 jest.mock('@/src/api/books');
@@ -28,8 +28,13 @@ jest.mock('@/src/downloads/DownloadsContext', () => ({
     getDownload: () => undefined,
   }),
 }));
+jest.mock('@/src/context/AuthContext', () => ({
+  useAuthContext: () => ({ user: null }),
+}));
 
 const mockGetBookDetail = getBookDetail as jest.MockedFunction<typeof getBookDetail>;
+const mockGetAuthorBooks = getAuthorBooks as jest.MockedFunction<typeof getAuthorBooks>;
+const mockGetRecommendations = getRecommendations as jest.MockedFunction<typeof getRecommendations>;
 
 function makeBook(overrides: Partial<BookDetail> = {}): BookDetail {
   return {
@@ -57,6 +62,8 @@ function makeBook(overrides: Partial<BookDetail> = {}): BookDetail {
     genres: ['Fantasy'],
     tags: ['favorites'],
     files: [],
+    readStatus: null,
+    collections: [],
     audioMetadata: null,
     ...overrides,
   };
@@ -74,6 +81,8 @@ function renderScreen(): ReactElement {
 describe('BookDetailScreen', () => {
   beforeEach(() => {
     mockGetBookDetail.mockReset();
+    mockGetAuthorBooks.mockReset().mockResolvedValue([]);
+    mockGetRecommendations.mockReset().mockResolvedValue([]);
   });
 
   it('renders the synopsis, details, Goodreads link and tags', async () => {

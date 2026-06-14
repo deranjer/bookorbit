@@ -81,6 +81,8 @@ function book(): BookDetail {
     genres: [],
     tags: [],
     files: [file(50, 100), file(51, 200)],
+    readStatus: null,
+    collections: [],
     audioMetadata: null,
   };
 }

@@ -122,6 +122,27 @@ export interface BookAuthorRef {
   sortName: string | null;
 }
 
+export type ReadStatusSource = 'auto' | 'manual';
+
+export interface UserBookStatus {
+  status: ReadStatus;
+  source: ReadStatusSource;
+  startedAt: string | null;
+  finishedAt: string | null;
+  updatedAt: string;
+}
+
+// Lean mirror of @bookorbit/types BookRecommendation / SeriesBookRecommendation.
+// Returned by the recommendation, author-books, and series-books endpoints.
+export interface BookRecommendation {
+  id: number;
+  title: string | null;
+  hasCover: boolean;
+  authors: string[];
+  seriesIndex?: number | null;
+  isAudiobook?: boolean;
+}
+
 // Mirrors the populated subset of the server BookDetailDto that the details page renders.
 export interface BookDetail {
   id: number;
@@ -148,6 +169,8 @@ export interface BookDetail {
   genres: string[];
   tags: string[];
   files: BookFileRef[];
+  readStatus: UserBookStatus | null;
+  collections: { id: number; name: string }[];
   audioMetadata: AudioMetadata | null;
 }
 
@@ -188,6 +211,12 @@ export interface Collection {
   bookCount?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+// `GET /collections?bookIds=` augments each collection with a membership count:
+// memberCount > 0 means at least one of the queried books is in the collection.
+export interface CollectionWithMembership extends Collection {
+  memberCount: number;
 }
 
 export interface AuthorSummary {
