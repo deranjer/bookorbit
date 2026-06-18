@@ -96,19 +96,16 @@ Imported as `@bookorbit/types` by both client and server. Never duplicate types 
 - **Composables over stores.** Feature-local state lives in composables at `features/<name>/composables/use*.ts`. Pinia only for app-wide state.
 - **Native fetch only.** No axios or other HTTP libraries.
 
-### Mobile (`mobile/`)
+### Android (`android/`)
 
-- **No emoji as icons.** Never use emoji (e.g. 🙈, 👁) as icons or UI affordances unless a task explicitly asks for it. Use `Ionicons` from `@expo/vector-icons` (the icon set already used throughout the app).
+The BookOrbit mobile client is a **native Kotlin app** under `android/` — a standalone Gradle project, isolated from the pnpm workspace (it does not participate in `pnpm install` / `pnpm dev`). Stack: Kotlin + Jetpack Compose (Material 3), MVVM + Hilt + Coroutines/Flow, Retrofit/OkHttp + kotlinx.serialization, **Media3/ExoPlayer** for audiobooks, Coil, Room + DataStore + EncryptedSharedPreferences, WorkManager for downloads, AppAuth for OIDC, Paging 3. Build/run: `cd android && ./gradlew :app:installDebug` (see `android/local.properties` for the SDK path; min SDK 26, compile/target 36). CI lives in `.github/workflows/android-build.yml` (lint + unit tests + `assembleDebug` on `android/**` changes). See `android/README.md` for the full setup guide.
 
-#### Ebook reader (foliate.js in a WebView)
-
-The mobile reader (`mobile/src/reader/`, screen `mobile/app/reader/[id].tsx`) renders ebooks (EPUB, MOBI/AZW3, FB2, CBZ/CBR — **not** PDF) by running the **same foliate.js engine the web client uses**, inside a `react-native-webview`. This is what gives parity, including identical EPUB CFI strings so reading position syncs with the web client and Kobo.
-
-- **Foliate is vendored, not a package.** The web client serves foliate from `client/public/assets/foliate/`. The mobile app ships its **own copy** of those files under `mobile/assets/reader/foliate/`. **These are duplicates: any update to the web client's foliate assets must be re-copied into the mobile app**, and `READER_ASSET_VERSION` in `mobile/src/reader/assets.ts` must be bumped so existing installs re-extract the new files. (Despite the file living under the web client, both are just static foliate builds — the server does not serve foliate to mobile.)
-- **`.txt` suffix is deliberate.** Metro treats `.js` as source, so reader assets (foliate + `index.html` + `bridge.js`) are stored as `*.txt` and `metro.config.js` registers `txt` as an asset extension. `assets.ts` copies them to `documentDirectory/reader/` at first launch, stripping `.txt`.
-- **RN owns all networking; the WebView only sees local `file://`.** `source.ts` resolves a book to a local file (offline download, else a cached fetch of `/books/files/:id/serve`), and bytes are streamed into the WebView as base64 chunks. Do not make the WebView call the server.
-- **Three theme tables must stay in sync** when changing reader themes: web `client/src/features/reader/epub/constants/themes.ts`, the `THEMES`/`generateCSS` block in `mobile/assets/reader/bridge.js.txt` (the actual rendering CSS, ported from the web `useReaderState.ts`), and `mobile/src/reader/themes.ts` (the settings-UI swatches).
-- Progress sync mirrors the audiobook player's offline pattern (local-first write + dirty flag + flush on reconnect); see `mobile/src/reader/offlineProgress.ts`.
+- **No emoji as icons.** Never use emoji (e.g. 🙈, 👁) as icons or UI affordances unless a task explicitly asks for it. Use `androidx.compose.material.icons` (Material Symbols).
+- **The server is unchanged.** API models are **hand-written** Kotlin `@Serializable` classes (`android/app/src/main/java/com/bookorbit/core/model/`) mirroring the server's API types; there is no OpenAPI codegen, so DTO changes must be mirrored from the server by hand. `BaseUrlInterceptor` rewrites every request onto the configured server + `/api/v1`, with single-flight token refresh.
+- **The reader runs foliate.js in a WebView** — the only way to preserve byte-identical EPUB CFI sync with the web client + Kobo. It renders EPUB, MOBI/AZW3, FB2, CBZ/CBR (**not** PDF) with the **same foliate.js engine the web client uses**. Foliate is vendored, not a package: the web client serves it from `client/public/assets/foliate/`, and `android/app/src/main/assets/reader/` holds a copy of those files plus `bridge.js` + `index.html`. **Any update to the web client's foliate assets must be re-copied into `android/app/src/main/assets/reader/`.** Assets are served via `WebViewAssetLoader`; the host page (`index.html`) shims `window.ReactNativeWebView` onto an Android `@JavascriptInterface` so the vendored `bridge.js` runs unchanged.
+- **The app owns all networking; the WebView only ever sees local content.** A book is resolved to a local file (offline download, else a cached fetch of `/books/files/:id/serve`) and streamed into the WebView as base64 chunks via a begin/chunk/commit protocol. Do not make the WebView call the server.
+- **Reader themes are a THREE-way sync.** When changing reader themes keep these aligned: web `client/src/features/reader/epub/constants/themes.ts`, the `THEMES`/`generateCSS` block in `android/app/src/main/assets/reader/bridge.js` (the actual rendering CSS), and the settings-UI swatches in `android/.../feature/reader/ReaderThemes.kt`. Re-copy `bridge.js`/foliate into the Android assets whenever the web build changes.
+- **Offline-first progress** (reader + audiobook) uses Room (`core/db/`) with a local-write + dirty-flag + flush-on-reconnect pattern.
 
 ### Database
 

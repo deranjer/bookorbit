@@ -1,7 +1,6 @@
 name: Android Build
 
-# Builds and tests the native Kotlin Android app (android/). Replaces the Expo/EAS
-# mobile-build pipeline for Android as part of the native migration. Runs on PRs and on
+# Builds and tests the native Kotlin Android app (android/). Runs on PRs and on
 # pushes to main that touch android/**.
 #
 # Release signing + Play upload are added later: provide an upload keystore (base64) and a
