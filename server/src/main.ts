@@ -19,7 +19,7 @@ const MAX_COVER_BYTES = 20 * 1024 * 1024;
 async function bootstrap() {
   const allowCloudflareInsights = parseBooleanEnv(process.env.CSP_ALLOW_CLOUDFLARE_INSIGHTS, false);
 
-  const adapter = new FastifyAdapter({ logger: false, trustProxy: parseTrustProxy(process.env.TRUST_PROXY) });
+  const adapter = new FastifyAdapter({ logger: false, trustProxy: parseTrustProxy(process.env.TRUST_PROXY), maxParamLength: 1000 });
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, { bufferLogs: true });
   app.useLogger(app.get(Logger));
 
@@ -32,6 +32,10 @@ async function bootstrap() {
     const isJson = ct.startsWith('application/json');
     const isEmpty = request.headers['content-length'] === '0' || request.headers['content-length'] === undefined;
     if (isJson && isEmpty) {
+      // Kobo sends Content-Length: 0 with application/json on DELETE; align header with injected body.
+      if (request.method === 'DELETE' && request.headers['content-length'] === '0') {
+        request.headers['content-length'] = '2';
+      }
       const fake = new Readable();
       fake.push('{}');
       fake.push(null);

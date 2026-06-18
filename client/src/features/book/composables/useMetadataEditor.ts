@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 import { api } from '@/lib/api'
-import { FORMAT_TO_GROUP, type BookDetail, type BookMetadataLockField } from '@bookorbit/types'
+import { FORMAT_TO_GROUP, type BookDetail, type BookMetadataLockField, type BookMetadataSaveResult } from '@bookorbit/types'
 
 const ROOT_FIELDS = [
   'title',
@@ -25,7 +25,9 @@ const ROOT_FIELDS = [
   'openLibraryId',
   'itunesId',
   'audibleId',
+  'koboId',
   'comicvineId',
+  'ranobedbId',
 ] as const
 
 const COMIC_FIELDS = {
@@ -78,7 +80,9 @@ export function useMetadataEditor() {
     openLibraryId: null as string | null,
     itunesId: null as string | null,
     audibleId: null as string | null,
+    koboId: null as string | null,
     comicvineId: null as string | null,
+    ranobedbId: null as string | null,
     comicIssueNumber: null as string | null,
     comicVolumeName: null as string | null,
     comicStoryArcs: [] as string[],
@@ -123,7 +127,9 @@ export function useMetadataEditor() {
     form.openLibraryId = book.providerIds.openLibrary ?? null
     form.itunesId = book.providerIds.itunes ?? null
     form.audibleId = book.providerIds.audible ?? null
+    form.koboId = book.providerIds.kobo ?? null
     form.comicvineId = book.providerIds.comicvine ?? null
+    form.ranobedbId = book.providerIds.ranobedb ?? null
     const cm = book.comicMetadata
     form.comicIssueNumber = cm?.issueNumber ?? null
     form.comicVolumeName = cm?.volumeName ?? null
@@ -181,21 +187,30 @@ export function useMetadataEditor() {
     return payload
   }
 
+  function normalizeSaveResult(data: BookDetail | BookMetadataSaveResult): BookMetadataSaveResult {
+    if ('book' in data && 'libraryAutoWriteEnabled' in data) {
+      return data
+    }
+    return { book: data, write: null, libraryAutoWriteEnabled: false }
+  }
+
   async function save(
     bookId: number,
     options: { lockedFields?: readonly BookMetadataLockField[]; saveLocks?: boolean } = {},
-  ): Promise<BookDetail | null> {
+  ): Promise<BookMetadataSaveResult | null> {
     saving.value = true
     error.value = null
     try {
       const metadata = buildPayload()
-      const res = await api(options.saveLocks ? `/api/v1/books/${bookId}/metadata-and-locks` : `/api/v1/books/${bookId}/metadata`, {
+      const path = options.saveLocks ? `/api/v1/books/${bookId}/metadata-and-locks` : `/api/v1/books/${bookId}/metadata`
+      const shouldSyncFileWrite = Object.keys(metadata).length > 0
+      const res = await api(`${path}${shouldSyncFileWrite ? '?syncFileWrite=true' : ''}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(options.saveLocks ? { metadata, lockedFields: options.lockedFields ?? [] } : metadata),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const updated: BookDetail = await res.json()
+      const updated = normalizeSaveResult((await res.json()) as BookDetail | BookMetadataSaveResult)
       snapshot.value = JSON.stringify(form)
       return updated
     } catch (e) {

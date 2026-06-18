@@ -20,6 +20,9 @@ import { HardcoverClient } from './providers/hardcover/hardcover.client';
 import { HardcoverProvider } from './providers/hardcover/hardcover.provider';
 import { ComicVineClient } from './providers/comicvine/comicvine.client';
 import { ComicVineProvider } from './providers/comicvine/comicvine.provider';
+import { KoboProvider } from './providers/kobo/kobo.provider';
+import { RanobeDbClient } from './providers/ranobedb/ranobedb.client';
+import { RanobeDbProvider } from './providers/ranobedb/ranobedb.provider';
 
 const PROVIDER_CLASSES = [
   GoogleProvider,
@@ -31,6 +34,8 @@ const PROVIDER_CLASSES = [
   AudnexusProvider,
   HardcoverProvider,
   ComicVineProvider,
+  RanobeDbProvider,
+  KoboProvider,
 ];
 
 @Module({
@@ -44,6 +49,7 @@ const PROVIDER_CLASSES = [
     },
     HardcoverClient,
     ComicVineClient,
+    RanobeDbClient,
     ProviderRegistry,
     ProviderThrottleTracker,
     MetadataFetchRepository,

@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, OnModuleInit, Optional } from '@nestjs/common';
 import { basename, dirname, extname, join } from 'path';
 import { access as fsAccess, readFile, stat, unlink } from 'fs/promises';
 import { and, eq, inArray, or, sql } from 'drizzle-orm';
@@ -7,9 +7,10 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { BookDockAutoFinalizeMetadataMode, BookDockFinalizeFileResult, BookDockFinalizeResult, BookDockMetadata } from '@bookorbit/types';
 import { NotificationType, resolveUploadPath } from '@bookorbit/types';
 import { NotificationService } from '../notification/notification.service';
+import { SeriesIdentityService } from '../../common/services/series-identity.service';
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
-import { bookMetadata, books, libraries, libraryFolders } from '../../db/schema';
+import { authors, bookAuthors, bookMetadata, books, libraries, libraryFolders } from '../../db/schema';
 import { AppSettingsService } from '../app-settings/app-settings.service';
 import { LibraryService } from '../library/library.service';
 import { MetadataService } from '../metadata/metadata.service';
@@ -63,6 +64,7 @@ export class BookDockFinalizeService implements OnModuleInit {
     private readonly events: BookDockEventsService,
     private readonly gateway: BookDockGateway,
     private readonly notificationService: NotificationService,
+    @Optional() private readonly seriesIdentity?: SeriesIdentityService,
   ) {}
 
   onModuleInit() {
@@ -321,7 +323,10 @@ export class BookDockFinalizeService implements OnModuleInit {
     defaultLibraryId: number | undefined,
     overrideMap: Map<number, { libraryId?: number; folderId?: number }>,
   ): Promise<Map<string, number>> {
-    const needsByLibrary = new Map<number, { isbn13: Set<string>; isbn10: Set<string>; titles: Set<string> }>();
+    const needsByLibrary = new Map<
+      number,
+      { isbn13: Set<string>; isbn10: Set<string>; titles: Set<string>; authors: Set<string>; titleAuthorPairs: Set<string> }
+    >();
 
     for (const row of rows) {
       const override = overrideMap.get(row.id);
@@ -331,7 +336,7 @@ export class BookDockFinalizeService implements OnModuleInit {
       const meta = normalizeFinalizeMetadata(row.selectedMetadata ?? row.embeddedMetadata ?? {});
       let bucket = needsByLibrary.get(libraryId);
       if (!bucket) {
-        bucket = { isbn13: new Set(), isbn10: new Set(), titles: new Set() };
+        bucket = { isbn13: new Set(), isbn10: new Set(), titles: new Set(), authors: new Set(), titleAuthorPairs: new Set() };
         needsByLibrary.set(libraryId, bucket);
       }
 
@@ -340,7 +345,13 @@ export class BookDockFinalizeService implements OnModuleInit {
       } else if (meta.isbn10) {
         bucket.isbn10.add(meta.isbn10);
       } else if (meta.title) {
+        const normalizedAuthors = normalizeDuplicateAuthors(meta.authors);
+        if (normalizedAuthors.length === 0) continue;
         bucket.titles.add(meta.title.toLowerCase());
+        for (const authorName of normalizedAuthors) {
+          bucket.authors.add(authorName);
+          bucket.titleAuthorPairs.add(`${meta.title.toLowerCase()}|${authorName}`);
+        }
       }
     }
 
@@ -376,18 +387,34 @@ export class BookDockFinalizeService implements OnModuleInit {
         }
       }
 
-      if (values.titles.size > 0) {
-        const rowsByTitle = await this.db
+      if (values.titles.size > 0 && values.authors.size > 0) {
+        const rowsByTitleAuthor = await this.db
           .select({
             bookId: bookMetadata.bookId,
             normalizedTitle: sql<string>`lower(${bookMetadata.title})`,
+            normalizedAuthor: sql<string>`lower(${authors.name})`,
           })
           .from(bookMetadata)
           .innerJoin(books, eq(books.id, bookMetadata.bookId))
-          .where(and(eq(books.libraryId, libraryId), inArray(sql<string>`lower(${bookMetadata.title})`, [...values.titles])));
-        for (const row of rowsByTitle) {
-          if (!row.normalizedTitle) continue;
-          const key = this.buildDuplicateLookupKey(libraryId, { isbn13: null, isbn10: null, title: row.normalizedTitle });
+          .innerJoin(bookAuthors, eq(bookAuthors.bookId, bookMetadata.bookId))
+          .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+          .where(
+            and(
+              eq(books.libraryId, libraryId),
+              inArray(sql<string>`lower(${bookMetadata.title})`, [...values.titles]),
+              inArray(sql<string>`lower(${authors.name})`, [...values.authors]),
+            ),
+          );
+        for (const row of rowsByTitleAuthor) {
+          if (!row.normalizedTitle || !row.normalizedAuthor) continue;
+          const pairKey = `${row.normalizedTitle}|${row.normalizedAuthor}`;
+          if (!values.titleAuthorPairs.has(pairKey)) continue;
+          const key = this.buildDuplicateLookupKey(libraryId, {
+            isbn13: null,
+            isbn10: null,
+            title: row.normalizedTitle,
+            author: row.normalizedAuthor,
+          });
           if (key && !lookup.has(key)) {
             lookup.set(key, row.bookId);
           }
@@ -398,31 +425,34 @@ export class BookDockFinalizeService implements OnModuleInit {
     return lookup;
   }
 
-  private buildDuplicateLookupKey(libraryId: number, meta: Pick<NormalizedFinalizeMetadata, 'isbn13' | 'isbn10' | 'title'>): string | null {
+  private buildDuplicateLookupKey(
+    libraryId: number,
+    meta: { isbn13: string | null; isbn10: string | null; title: string | null; author?: string | null },
+  ): string | null {
     const isbn = meta.isbn13 ?? meta.isbn10;
     if (isbn) {
       const isbnKind = meta.isbn13 ? 'isbn13' : 'isbn10';
       return `library:${libraryId}|${isbnKind}:${isbn}`;
     }
-    if (meta.title) {
-      return `library:${libraryId}|title:${meta.title.toLowerCase()}`;
+    if (meta.title && meta.author) {
+      return `library:${libraryId}|title:${meta.title.toLowerCase()}|author:${meta.author.toLowerCase()}`;
     }
     return null;
   }
 
   private async findDuplicate(
     libraryId: number,
-    meta: Pick<NormalizedFinalizeMetadata, 'isbn13' | 'isbn10' | 'title'>,
+    meta: Pick<NormalizedFinalizeMetadata, 'isbn13' | 'isbn10' | 'title' | 'authors'>,
     duplicateLookup?: Map<string, number>,
   ): Promise<number | null> {
-    const lookupKey = this.buildDuplicateLookupKey(libraryId, meta);
-    if (lookupKey && duplicateLookup?.has(lookupKey)) {
-      return duplicateLookup.get(lookupKey) ?? null;
-    }
-
     const isbn = meta.isbn13 ?? meta.isbn10;
 
     if (isbn) {
+      const lookupKey = this.buildDuplicateLookupKey(libraryId, { isbn13: meta.isbn13, isbn10: meta.isbn10, title: null, author: null });
+      if (lookupKey && duplicateLookup?.has(lookupKey)) {
+        return duplicateLookup.get(lookupKey) ?? null;
+      }
+
       const conditions = meta.isbn13 ? [eq(bookMetadata.isbn13, meta.isbn13)] : [eq(bookMetadata.isbn10, meta.isbn10!)];
 
       const [existing] = await this.db
@@ -436,11 +466,34 @@ export class BookDockFinalizeService implements OnModuleInit {
     }
 
     if (!isbn && meta.title) {
+      const normalizedAuthors = normalizeDuplicateAuthors(meta.authors);
+      if (normalizedAuthors.length === 0) return null;
+
+      for (const authorName of normalizedAuthors) {
+        const lookupKey = this.buildDuplicateLookupKey(libraryId, {
+          isbn13: null,
+          isbn10: null,
+          title: meta.title,
+          author: authorName,
+        });
+        if (lookupKey && duplicateLookup?.has(lookupKey)) {
+          return duplicateLookup.get(lookupKey) ?? null;
+        }
+      }
+
       const [existing] = await this.db
         .select({ bookId: bookMetadata.bookId })
         .from(bookMetadata)
         .innerJoin(books, eq(books.id, bookMetadata.bookId))
-        .where(and(eq(books.libraryId, libraryId), sql`lower(${bookMetadata.title}) = lower(${meta.title})`))
+        .innerJoin(bookAuthors, eq(bookAuthors.bookId, bookMetadata.bookId))
+        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+        .where(
+          and(
+            eq(books.libraryId, libraryId),
+            sql`lower(${bookMetadata.title}) = lower(${meta.title})`,
+            inArray(sql<string>`lower(${authors.name})`, normalizedAuthors),
+          ),
+        )
         .limit(1);
 
       if (existing) return existing.bookId;
@@ -514,23 +567,23 @@ export class BookDockFinalizeService implements OnModuleInit {
       }
     }
 
-    await this.db
-      .update(bookMetadata)
-      .set({
-        title: meta.title ?? null,
-        subtitle: meta.subtitle ?? null,
-        description: meta.description ?? null,
-        isbn10: meta.isbn10 ?? null,
-        isbn13: meta.isbn13 ?? null,
-        publisher: meta.publisher ?? null,
-        publishedYear: meta.publishedYear ?? null,
-        language: meta.language ?? null,
-        seriesName: meta.seriesName ?? null,
-        seriesIndex: meta.seriesIndex ?? null,
-        pageCount: meta.pageCount ?? null,
-        updatedAt: new Date(),
-      })
-      .where(eq(bookMetadata.bookId, bookId));
+    const scalarFields = {
+      title: meta.title ?? null,
+      subtitle: meta.subtitle ?? null,
+      description: meta.description ?? null,
+      isbn10: meta.isbn10 ?? null,
+      isbn13: meta.isbn13 ?? null,
+      publisher: meta.publisher ?? null,
+      publishedYear: meta.publishedYear ?? null,
+      language: meta.language ?? null,
+      seriesName: meta.seriesName ?? null,
+      seriesIndex: meta.seriesIndex ?? null,
+      pageCount: meta.pageCount ?? null,
+      updatedAt: new Date(),
+    };
+    const patch = (await this.seriesIdentity?.resolveMetadataPatch(scalarFields)) ?? scalarFields;
+
+    await this.db.update(bookMetadata).set(patch).where(eq(bookMetadata.bookId, bookId));
 
     if (meta.authors.length > 0) {
       await this.metadataService.replaceAuthors(
@@ -636,6 +689,18 @@ function normalizeStringArray(value: unknown, maxLength: number): string[] {
     normalized.push(trimmed.slice(0, maxLength));
   }
   return normalized;
+}
+
+function normalizeDuplicateAuthors(value: string[] | null | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+  const normalized = new Set<string>();
+  for (const author of value) {
+    if (typeof author !== 'string') continue;
+    const trimmed = author.trim().toLowerCase();
+    if (!trimmed) continue;
+    normalized.add(trimmed);
+  }
+  return [...normalized];
 }
 
 function normalizeFinalizeMetadata(meta: BookDockMetadata | null | undefined): NormalizedFinalizeMetadata {

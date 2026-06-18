@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
+import { defineComponent } from 'vue'
 import type { BookDetail } from '@bookorbit/types'
 import DetailsTab from '../DetailsTab.vue'
 import { useDisplaySettings } from '@/composables/useDisplaySettings'
@@ -7,6 +8,7 @@ import { useDisplaySettings } from '@/composables/useDisplaySettings'
 const mocks = vi.hoisted(() => ({
   api: vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(),
   push: vi.fn<(to: unknown) => void>(),
+  hasPermission: vi.fn<(...args: unknown[]) => boolean>(),
 }))
 
 vi.mock('vue-router', async (importOriginal) => {
@@ -22,7 +24,7 @@ vi.mock('@/lib/api', () => ({
 }))
 
 vi.mock('@/features/auth/composables/usePermissions', () => ({
-  usePermissions: () => ({ hasPermission: () => true }),
+  usePermissions: () => ({ hasPermission: mocks.hasPermission }),
 }))
 
 function makeBook(overrides: Partial<BookDetail> = {}): BookDetail {
@@ -82,6 +84,17 @@ function response(data: unknown): Response {
   } as Response
 }
 
+const RouterLinkStub = defineComponent({
+  name: 'RouterLink',
+  props: {
+    to: {
+      type: [String, Object],
+      required: true,
+    },
+  },
+  template: '<a><slot /></a>',
+})
+
 function mountDetails(book: BookDetail) {
   return shallowMount(DetailsTab, {
     props: { book },
@@ -89,6 +102,10 @@ function mountDetails(book: BookDetail) {
       stubs: {
         BookCoverArtwork: false,
         BookCoverSurface: false,
+        RouterLink: RouterLinkStub,
+        Popover: { template: '<div><slot /><slot name="content" /></div>' },
+        PopoverTrigger: { template: '<div><slot /></div>' },
+        PopoverContent: { template: '<div><slot /></div>' },
       },
     },
   })
@@ -111,6 +128,8 @@ describe('DetailsTab cover surface', () => {
   beforeEach(() => {
     mocks.api.mockReset()
     mocks.push.mockReset()
+    mocks.hasPermission.mockReset()
+    mocks.hasPermission.mockReturnValue(true)
 
     mocks.api.mockImplementation(async (input) => {
       const url = String(input)
@@ -209,5 +228,54 @@ describe('DetailsTab cover surface', () => {
     await loadCoverImages(wrapper)
 
     expect(wrapper.findAll('.book-cover-spine-layer').length).toBe(0)
+  })
+
+  it('links authors to their author detail pages', async () => {
+    const wrapper = mountDetails(
+      makeBook({
+        authors: [
+          { id: 41, name: 'Author One', sortName: null },
+          { id: 42, name: 'Author Two', sortName: null },
+        ],
+      }),
+    )
+    await flushPromises()
+
+    const authorLinks = wrapper.findAllComponents(RouterLinkStub).filter((link) => link.text() === 'Author One' || link.text() === 'Author Two')
+
+    expect(authorLinks).toHaveLength(4)
+    expect(authorLinks.map((link) => link.props('to'))).toEqual([
+      { name: 'author-detail', params: { id: 41 } },
+      { name: 'author-detail', params: { id: 42 } },
+      { name: 'author-detail', params: { id: 41 } },
+      { name: 'author-detail', params: { id: 42 } },
+    ])
+    expect(wrapper.text()).toContain('Author One, Author Two')
+  })
+
+  it('renders Send via Email button and opens dialog when user has email_send permission', async () => {
+    mocks.hasPermission.mockImplementation((perm) => perm === 'email_send')
+    const wrapper = mountDetails(makeBook())
+    await flushPromises()
+
+    const sendButtons = wrapper.findAll('button').filter((b) => b.text().includes('Send via Email'))
+    expect(sendButtons.length).toBeGreaterThan(0) // Desktop and mobile menus
+
+    // Find the stubbed SendBookDialog
+    const sendDialog = wrapper.findComponent({ name: 'SendBookDialog' })
+    expect(sendDialog.exists()).toBe(true)
+    expect(sendDialog.props('open')).toBe(false)
+
+    await sendButtons[0]!.trigger('click')
+    expect(sendDialog.props('open')).toBe(true)
+  })
+
+  it('does not render Send via Email button when user lacks email_send permission', async () => {
+    mocks.hasPermission.mockImplementation((perm) => perm !== 'email_send')
+    const wrapper = mountDetails(makeBook())
+    await flushPromises()
+
+    const sendButtons = wrapper.findAll('button').filter((b) => b.text().includes('Send via Email'))
+    expect(sendButtons.length).toBe(0)
   })
 })

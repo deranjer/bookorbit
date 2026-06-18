@@ -1,4 +1,12 @@
-import type { AudiobookChapter, BookMetadataLockField, ComicMetadataFields, NarratorRef, ProviderIds, UserBookStatus } from '@bookorbit/types';
+import type {
+  AudiobookChapter,
+  BookFileWriteStatus,
+  BookMetadataLockField,
+  ComicMetadataFields,
+  NarratorRef,
+  ProviderIds,
+  UserBookStatus,
+} from '@bookorbit/types';
 
 export class BookFileDto {
   id: number;
@@ -34,6 +42,7 @@ export class BookDetailDto {
   publishedYear: number | null;
   language: string | null;
   pageCount: number | null;
+  seriesId: number | null;
   seriesName: string | null;
   seriesIndex: number | null;
   rating: number | null;
@@ -51,4 +60,5 @@ export class BookDetailDto {
   comicMetadata: ComicMetadataFields | null;
   lockedFields: BookMetadataLockField[];
   collections: { id: number; name: string }[];
+  fileWriteStatus: BookFileWriteStatus;
 }

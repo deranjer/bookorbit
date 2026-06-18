@@ -1,7 +1,8 @@
-import type { MetadataProviderKey } from "./metadata-fetch";
+import type { MetadataFetchDiagnostics, MetadataProviderKey } from "./metadata-fetch";
 import type { BookMetadataLockField } from "./metadata-lock";
 import type { AudiobookChapter, NarratorRef } from "./audiobook";
 import type { ComicMetadataFields } from "./metadata-fetch";
+import type { BookFileWriteField, WriteResult } from "./file-write";
 
 export const BOOK_FORMATS = ["epub", "pdf", "mobi", "azw3", "cbz", "cbr", "cb7", "fb2", "m4b", "mp3", "m4a", "opus", "ogg", "flac"] as const;
 export type BookFormat = (typeof BOOK_FORMATS)[number];
@@ -35,6 +36,7 @@ export type BookCard = {
   status: string;
   title: string | null;
   authors: string[];
+  seriesId?: number | null;
   seriesName: string | null;
   seriesIndex: number | null;
   files: BookFileRef[];
@@ -79,6 +81,20 @@ export type AudioMetadata = {
   chapters: AudiobookChapter[] | null;
 };
 
+export type BookFileWriteDisabledReason =
+  | "library_disabled"
+  | "no_primary_file"
+  | "format_not_supported"
+  | "format_disabled"
+  | "file_exceeds_size_limit";
+
+export type BookFileWriteStatus = {
+  enabled: boolean;
+  reason: BookFileWriteDisabledReason | null;
+  writableFormats: BookFormat[];
+  writableFields: BookFileWriteField[];
+};
+
 export type BookDetail = {
   id: number;
   libraryId: number;
@@ -95,6 +111,7 @@ export type BookDetail = {
   publishedYear: number | null;
   language: string | null;
   pageCount: number | null;
+  seriesId?: number | null;
   seriesName: string | null;
   seriesIndex: number | null;
   rating: number | null;
@@ -112,6 +129,50 @@ export type BookDetail = {
   comicMetadata: ComicMetadataFields | null;
   lockedFields: BookMetadataLockField[];
   collections: { id: number; name: string }[];
+  fileWriteStatus?: BookFileWriteStatus;
+};
+
+export type BookMetadataSaveResult = {
+  book: BookDetail;
+  write: WriteResult | null;
+  libraryAutoWriteEnabled: boolean;
+};
+
+export type BookMetadataRefreshPreviewFields = {
+  title?: string | null;
+  subtitle?: string | null;
+  description?: string | null;
+  authors?: string[];
+  genres?: string[];
+  publisher?: string | null;
+  publishedYear?: number | null;
+  language?: string | null;
+  pageCount?: number | null;
+  seriesName?: string | null;
+  seriesIndex?: number | null;
+  coverUrl?: string;
+  googleBooksId?: string | null;
+  goodreadsId?: string | null;
+  amazonId?: string | null;
+  hardcoverId?: string | null;
+  openLibraryId?: string | null;
+  itunesId?: string | null;
+  audibleId?: string | null;
+  koboId?: string | null;
+  comicvineId?: string | null;
+  ranobedbId?: string | null;
+  audioMetadata?: {
+    narrators?: string[];
+    durationSeconds?: number | null;
+    abridged?: boolean | null;
+    chapters?: AudiobookChapter[];
+  };
+  comicMetadata?: ComicMetadataFields;
+};
+
+export type BookMetadataRefreshPreviewResponse = {
+  metadata: BookMetadataRefreshPreviewFields;
+  diagnostics: MetadataFetchDiagnostics;
 };
 
 export type BookKoboReadingState = {

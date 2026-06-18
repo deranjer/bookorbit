@@ -21,7 +21,11 @@ env:
 jobs:
   commitlint:
     name: Lint PR Conventions
-    if: github.event_name == 'pull_request'
+    # PR title/commit-header conventions and issue references are only enforced
+    # on the canonical upstream repo. On forks (e.g. PoC PRs within
+    # deranjer/bookorbit) the job is skipped so fork-internal PRs aren't blocked
+    # by upstream commit history that predates the fork's stricter rules.
+    if: github.event_name == 'pull_request' && github.repository == 'bookorbit/bookorbit'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -30,7 +34,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
@@ -154,7 +158,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
@@ -197,7 +201,7 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
@@ -297,7 +301,7 @@ jobs:
       IMAGE_NAME: ${{ github.repository }}
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ needs.release.outputs.tag }}
 
