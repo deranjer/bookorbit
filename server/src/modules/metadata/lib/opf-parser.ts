@@ -23,6 +23,8 @@ export interface ParsedOpf {
   openLibraryId: string | null;
   ranobedbId: string | null;
   koboId: string | null;
+  lubimyczytacId: string | null;
+  aladinId: string | null;
   itunesId: string | null;
   coverHref: string | null;
 }
@@ -83,6 +85,56 @@ function parseBookOrbitTags(raw: string | null): string[] {
       .map((item) => item.trim())
       .filter(Boolean);
   }
+}
+
+type ProviderKey = 'google' | 'amazon' | 'goodreads' | 'hardcover' | 'openlibrary' | 'ranobedb' | 'kobo' | 'lubimyczytac' | 'aladin' | 'itunes';
+
+// Calibre 9.x (opf3) writes provider identifiers as bare `prefix:value` text inside <dc:identifier>.
+// Only these known prefixes are recognized, as a lowest-priority fallback after opf:scheme and urn:.
+const PREFIX_TO_PROVIDER: Record<string, ProviderKey> = {
+  amazon: 'amazon',
+  asin: 'amazon',
+  'mobi-asin': 'amazon',
+  goodreads: 'goodreads',
+  google: 'google',
+  openlibrary: 'openlibrary',
+  hardcover: 'hardcover',
+  kobo: 'kobo',
+  itunes: 'itunes',
+  lubimyczytac: 'lubimyczytac',
+  ranobedb: 'ranobedb',
+  aladin: 'aladin',
+};
+
+// Calibre stores custom-column values in a `calibre:user_metadata` JSON blob keyed by column name,
+// each value carrying the actual value under `#value#`. Used only to fill page count / subtitle when null.
+function parseCalibreUserMetadata(raw: string | null): { pageCount: number | null; subtitle: string | null } {
+  const empty = { pageCount: null, subtitle: null };
+  if (!raw) return empty;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return empty;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return empty;
+
+  const cols = parsed as Record<string, unknown>;
+  const columnValue = (key: string): unknown => {
+    const col = cols[key];
+    return typeof col === 'object' && col !== null && '#value#' in col ? (col as Record<string, unknown>)['#value#'] : undefined;
+  };
+  const coercePageCount = (v: unknown): number | null => {
+    if (v === undefined || v === null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+  };
+
+  const pageCount = coercePageCount(columnValue('#pagecount')) ?? coercePageCount(columnValue('#page_count'));
+  const subRaw = columnValue('#subtitle');
+  const subtitle = typeof subRaw === 'string' && subRaw.trim() ? subRaw.trim() : null;
+  return { pageCount, subtitle };
 }
 
 function normalizeCreatorRole(role: string | null | undefined): string {
@@ -152,6 +204,8 @@ export function parseOpf(xml: string): ParsedOpf {
     return null;
   }
 
+  const calibreUser = parseCalibreUserMetadata(propertyMeta('calibre:user_metadata'));
+
   // ── Titles ─────────────────────────────────────────────────────────────────
   let title: string | null = null;
   let subtitle: string | null = null;
@@ -171,6 +225,7 @@ export function parseOpf(xml: string): ParsedOpf {
     title ??= getText(rawTitles[0]);
   }
   subtitle ??= namedMeta('bookorbit:subtitle');
+  subtitle ??= calibreUser.subtitle;
 
   // ── Authors ────────────────────────────────────────────────────────────────
   const authors: { name: string; sortName: string | null }[] = [];
@@ -208,6 +263,8 @@ export function parseOpf(xml: string): ParsedOpf {
   let schemeOpenLibraryId: string | null = null;
   let schemeRanobedbId: string | null = null;
   let schemeKoboId: string | null = null;
+  let schemeLubimyczytacId: string | null = null;
+  let schemeAladinId: string | null = null;
   let schemeItunesId: string | null = null;
 
   let urnGoogleBooksId: string | null = null;
@@ -217,7 +274,12 @@ export function parseOpf(xml: string): ParsedOpf {
   let urnOpenLibraryId: string | null = null;
   let urnRanobedbId: string | null = null;
   let urnKoboId: string | null = null;
+  let urnLubimyczytacId: string | null = null;
+  let urnAladinId: string | null = null;
   let urnItunesId: string | null = null;
+
+  // Calibre prefix:value identifiers — lowest priority, resolved after scheme and urn.
+  const prefixIds: Partial<Record<ProviderKey, string>> = {};
 
   for (const ident of toArray(metadata['identifier'])) {
     const mo = (typeof ident === 'object' && ident !== null ? ident : {}) as Record<string, unknown>;
@@ -240,6 +302,8 @@ export function parseOpf(xml: string): ParsedOpf {
     if (scheme === 'openlibrary') schemeOpenLibraryId ??= value || null;
     if (scheme === 'ranobedb') schemeRanobedbId ??= value || null;
     if (scheme === 'kobo') schemeKoboId ??= value || null;
+    if (scheme === 'lubimyczytac') schemeLubimyczytacId ??= value || null;
+    if (scheme === 'aladin') schemeAladinId ??= value || null;
     if (scheme === 'itunes') schemeItunesId ??= value || null;
 
     // urn:-prefixed provider identifiers (legacy / backward-compat)
@@ -250,25 +314,42 @@ export function parseOpf(xml: string): ParsedOpf {
     if (value.startsWith('urn:openlibrary:')) urnOpenLibraryId ??= value.slice('urn:openlibrary:'.length) || null;
     if (value.startsWith('urn:ranobedb:')) urnRanobedbId ??= value.slice('urn:ranobedb:'.length) || null;
     if (value.startsWith('urn:kobo:')) urnKoboId ??= value.slice('urn:kobo:'.length) || null;
+    if (value.startsWith('urn:lubimyczytac:')) urnLubimyczytacId ??= value.slice('urn:lubimyczytac:'.length) || null;
+    if (value.startsWith('urn:aladin:')) urnAladinId ??= value.slice('urn:aladin:'.length) || null;
     if (value.startsWith('urn:itunes:')) urnItunesId ??= value.slice('urn:itunes:'.length) || null;
+
+    // Calibre prefix:value — only when there is no opf:scheme attribute and the value is not a urn:
+    if (scheme === '' && !value.startsWith('urn:')) {
+      const colon = value.indexOf(':');
+      if (colon > 0) {
+        const provider = PREFIX_TO_PROVIDER[value.slice(0, colon).toLowerCase()];
+        if (provider) {
+          const id = value.slice(colon + 1).trim();
+          if (id) prefixIds[provider] ??= id;
+        }
+      }
+    }
   }
 
-  // opf:scheme wins over urn: when both are present
-  const googleBooksId = schemeGoogleBooksId ?? urnGoogleBooksId;
-  const goodreadsId = schemeGoodreadsId ?? urnGoodreadsId;
-  const amazonId = schemeAmazonId ?? urnAmazonId;
-  const hardcoverId = schemeHardcoverId ?? urnHardcoverId;
-  const openLibraryId = schemeOpenLibraryId ?? urnOpenLibraryId;
-  const ranobedbId = schemeRanobedbId ?? urnRanobedbId;
-  const koboId = schemeKoboId ?? urnKoboId;
-  const itunesId = schemeItunesId ?? urnItunesId;
+  // Priority: opf:scheme → urn: → Calibre prefix:value
+  const googleBooksId = schemeGoogleBooksId ?? urnGoogleBooksId ?? prefixIds.google ?? null;
+  const goodreadsId = schemeGoodreadsId ?? urnGoodreadsId ?? prefixIds.goodreads ?? null;
+  const amazonId = schemeAmazonId ?? urnAmazonId ?? prefixIds.amazon ?? null;
+  const hardcoverId = schemeHardcoverId ?? urnHardcoverId ?? prefixIds.hardcover ?? null;
+  const openLibraryId = schemeOpenLibraryId ?? urnOpenLibraryId ?? prefixIds.openlibrary ?? null;
+  const ranobedbId = schemeRanobedbId ?? urnRanobedbId ?? prefixIds.ranobedb ?? null;
+  const koboId = schemeKoboId ?? urnKoboId ?? prefixIds.kobo ?? null;
+  const lubimyczytacId = schemeLubimyczytacId ?? urnLubimyczytacId ?? prefixIds.lubimyczytac ?? null;
+  const aladinId = schemeAladinId ?? urnAladinId ?? prefixIds.aladin ?? null;
+  const itunesId = schemeItunesId ?? urnItunesId ?? prefixIds.itunes ?? null;
 
   isbn10 ??= propertyMeta('bookorbit:isbn10') ?? namedMeta('bookorbit:isbn10');
 
   // ── Genres and tags ────────────────────────────────────────────────────────
   const genres = toArray(metadata['subject']).map(getText).filter(Boolean);
   const tags = parseBookOrbitTags(propertyMeta('bookorbit:tags') ?? namedMeta('bookorbit:tags'));
-  const pageCount = parseNumber(propertyMeta('bookorbit:page_count') ?? namedMeta('bookorbit:page_count'));
+  let pageCount = parseNumber(propertyMeta('bookorbit:page_count') ?? namedMeta('bookorbit:page_count'));
+  pageCount ??= calibreUser.pageCount;
   const rating = parseNumber(propertyMeta('bookorbit:rating') ?? namedMeta('bookorbit:rating'));
 
   // ── Series (Calibre EPUB2, then EPUB3) ────────────────────────────────────
@@ -381,6 +462,8 @@ export function parseOpf(xml: string): ParsedOpf {
     openLibraryId,
     ranobedbId,
     koboId,
+    lubimyczytacId,
+    aladinId,
     itunesId,
     coverHref,
   };

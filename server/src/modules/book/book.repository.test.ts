@@ -64,6 +64,7 @@ describe('BookRepository', () => {
     const fileProgressRows = [{ bookFileId: 1001, percentage: 45, updatedAt: new Date('2026-01-01T00:00:00.000Z') }];
     const statusRows = [{ bookId: 10, status: 'reading', source: 'manual', startedAt: null, finishedAt: null, updatedAt: null }];
     const narratorRows = [{ bookId: 10, name: 'Scott Brick' }];
+    const seriesMembershipRows = [{ bookId: 10, seriesId: 20, seriesName: 'Dune', seriesIndex: 1, displayOrder: 0 }];
     const progressRows = [{ bookFileId: 1001, percentage: 45 }];
 
     const db = {
@@ -75,6 +76,7 @@ describe('BookRepository', () => {
         .mockReturnValueOnce(makeSelectChain('where', genreRows))
         .mockReturnValueOnce(makeSelectChain('where', tagRows))
         .mockReturnValueOnce(makeSelectChain('orderBy', narratorRows))
+        .mockReturnValueOnce(makeSelectChain('orderBy', seriesMembershipRows))
         .mockReturnValueOnce(makeSelectChain('where', statusRows))
         .mockReturnValueOnce(makeSelectChain('where', fileProgressRows))
         .mockReturnValueOnce(makeSelectChain('where', [])),
@@ -92,6 +94,7 @@ describe('BookRepository', () => {
       progressRows,
       statusRows,
       narratorRows,
+      seriesMembershipRows,
       total: 1,
     });
   });
@@ -109,6 +112,7 @@ describe('BookRepository', () => {
         .mockReturnValueOnce(makeSelectChain('where', []))
         .mockReturnValueOnce(makeSelectChain('where', []))
         .mockReturnValueOnce(makeSelectChain('where', []))
+        .mockReturnValueOnce(makeSelectChain('orderBy', []))
         .mockReturnValueOnce(makeSelectChain('orderBy', []))
         .mockReturnValueOnce(makeSelectChain('where', []))
         .mockReturnValueOnce(makeSelectChain('where', readingProgressRows))
@@ -134,6 +138,7 @@ describe('BookRepository', () => {
       progressRows: [],
       statusRows: [],
       narratorRows: [],
+      seriesMembershipRows: [],
       total: 0,
     });
     expect(db.select).not.toHaveBeenCalled();
@@ -172,6 +177,7 @@ describe('BookRepository', () => {
       { id: 99, format: 'epub', role: 'primary', sizeBytes: 1, absolutePath: '/books/dune.epub', createdAt: new Date(), durationSeconds: null },
     ];
     const narratorRows = [{ id: 4, name: 'Narrator', sortName: null, displayOrder: 0 }];
+    const seriesMembershipRows = [{ seriesId: 20, seriesName: 'Dune', seriesIndex: 1, displayOrder: 0 }];
     const db = {
       select: vi
         .fn()
@@ -180,7 +186,8 @@ describe('BookRepository', () => {
         .mockReturnValueOnce(makeSelectChain('where', genreRows))
         .mockReturnValueOnce(makeSelectChain('where', tagRows))
         .mockReturnValueOnce(makeSelectChain('orderBy', fileRows))
-        .mockReturnValueOnce(makeSelectChain('orderBy', narratorRows)),
+        .mockReturnValueOnce(makeSelectChain('orderBy', narratorRows))
+        .mockReturnValueOnce(makeSelectChain('orderBy', seriesMembershipRows)),
     };
     const repo = new BookRepository(db as never);
 
@@ -193,6 +200,7 @@ describe('BookRepository', () => {
       tagRows,
       fileRows,
       narratorRows,
+      seriesMembershipRows,
     });
   });
 
@@ -303,8 +311,8 @@ describe('BookRepository', () => {
     const result = await repo.findRecommendationTitlesByBookIds([10, 11]);
 
     expect(result).toEqual([
-      { id: 10, title: 'Dune', hasCover: true, authors: ['Frank Herbert'], isAudiobook: true },
-      { id: 11, title: 'Foundation', hasCover: false, authors: ['Isaac Asimov', 'Robert Heinlein'], isAudiobook: false },
+      { id: 10, title: 'Dune', hasCover: true, authors: ['Frank Herbert'], isAudiobook: true, isComic: false },
+      { id: 11, title: 'Foundation', hasCover: false, authors: ['Isaac Asimov', 'Robert Heinlein'], isAudiobook: false, isComic: false },
     ]);
   });
 
@@ -317,7 +325,7 @@ describe('BookRepository', () => {
 
     const result = await repo.findRecommendationTitlesByBookIds([5]);
 
-    expect(result).toEqual([{ id: 5, title: 'No Cover', hasCover: false, authors: [], isAudiobook: false }]);
+    expect(result).toEqual([{ id: 5, title: 'No Cover', hasCover: false, authors: [], isAudiobook: false, isComic: false }]);
   });
 
   it('treats primary format checks as case-insensitive in recommendation rows', async () => {
@@ -329,7 +337,19 @@ describe('BookRepository', () => {
 
     const result = await repo.findRecommendationTitlesByBookIds([6]);
 
-    expect(result).toEqual([{ id: 6, title: 'Audio Case', hasCover: true, authors: [], isAudiobook: true }]);
+    expect(result).toEqual([{ id: 6, title: 'Audio Case', hasCover: true, authors: [], isAudiobook: true, isComic: false }]);
+  });
+
+  it('flags comic primary formats as isComic in recommendation rows', async () => {
+    const bookRows = [{ id: 8, title: 'Comic Case', coverSource: 'custom', primaryFormat: 'CBR' }];
+    const db = {
+      select: vi.fn().mockReturnValueOnce(makeSelectChain('where', bookRows)).mockReturnValueOnce(makeSelectChain('where', [])),
+    };
+    const repo = new BookRepository(db as never);
+
+    const result = await repo.findRecommendationTitlesByBookIds([8]);
+
+    expect(result).toEqual([{ id: 8, title: 'Comic Case', hasCover: true, authors: [], isAudiobook: false, isComic: true }]);
   });
 
   it('maps id-list helper rows and primary-file lookups', async () => {
@@ -360,7 +380,7 @@ describe('BookRepository', () => {
 
     await expect(repo.findLibraryIdsByBookIds([1])).resolves.toEqual(libraryRows);
     await expect(repo.findRecommendationTitlesByBookIds([1])).resolves.toEqual([
-      { id: 1, title: 'Dune', hasCover: true, authors: ['Frank Herbert'], isAudiobook: true },
+      { id: 1, title: 'Dune', hasCover: true, authors: ['Frank Herbert'], isAudiobook: true, isComic: false },
     ]);
     await expect(repo.findPrimaryFilesByBookIds([1])).resolves.toEqual(primaryFilesByIds);
     await expect(repo.findAllFilesByBookIds([1])).resolves.toEqual(allFilesByIds);

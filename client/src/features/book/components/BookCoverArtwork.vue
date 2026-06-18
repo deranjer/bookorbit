@@ -2,6 +2,7 @@
 import type { BookCoverDisplayMode, CoverAspectRatio } from '@bookorbit/types'
 import { computed, inject, ref, watch, type ComponentPublicInstance } from 'vue'
 import { COVER_ASPECT_RATIO_KEY, DEFAULT_COVER_ASPECT_RATIO, coverAspectRatioValue, fittedCoverFrameStyle } from '../lib/cover-aspect-ratio'
+import { getCachedCoverRatio, rememberLoadedCover } from '../lib/cover-load-cache'
 import { useDisplaySettings } from '@/composables/useDisplaySettings'
 import BookCoverPlaceholder from './BookCoverPlaceholder.vue'
 
@@ -22,6 +23,7 @@ const props = withDefaults(
     imageClass?: string
     resetKey?: string | number | null
     spine?: boolean
+    isComic?: boolean
   }>(),
   {
     authorLine: null,
@@ -35,6 +37,7 @@ const props = withDefaults(
     imageClass: '',
     resetKey: null,
     spine: true,
+    isComic: false,
   },
 )
 
@@ -43,12 +46,18 @@ const emit = defineEmits<{
   error: []
 }>()
 
-const { bookCoverDisplayMode } = useDisplaySettings()
+const { bookCoverDisplayMode, bookSpineOverlay, showSpineOnComics } = useDisplaySettings()
 const injectedAspectRatio = inject(COVER_ASPECT_RATIO_KEY, ref(DEFAULT_COVER_ASPECT_RATIO))
 
 const loaded = ref(false)
 const failed = ref(false)
 const imageRatio = ref<number | null>(null)
+// When a pooled view is reassigned to another book (virtual scroll, resize),
+// the browser already has the cover cached; restoring from this cache skips
+// the skeleton flash and fade-in replay that otherwise make the grid flicker.
+const instant = ref(false)
+
+restoreFromCoverCache()
 
 const effectiveMode = computed(() => props.mode ?? bookCoverDisplayMode.value)
 const frameAspectRatio = computed(() => props.frameAspectRatio ?? injectedAspectRatio.value)
@@ -56,7 +65,17 @@ const slotRatio = computed(() => coverAspectRatioValue(String(frameAspectRatio.v
 const canRenderImage = computed(() => props.hasCover && props.src !== null && props.src !== '' && !failed.value)
 const showBlurredBackdrop = computed(() => effectiveMode.value === 'blurred-fit' && canRenderImage.value && loaded.value)
 const useNaturalFrame = computed(() => effectiveMode.value === 'natural-bottom' && canRenderImage.value && loaded.value)
-const showSpineLayer = computed(() => props.spine && canRenderImage.value && loaded.value)
+const spineMode = computed(() => {
+  if (!props.spine) return 'off'
+  if (props.isComic && !showSpineOnComics.value) return 'off'
+  return bookSpineOverlay?.value ?? 'off'
+})
+// In blurred-fit the image is letterboxed inside the full slot, so the spine
+// layer must be fitted to the image rectangle. Until the ratio is known that
+// fit can't be computed, so hold the layer back rather than let it span the
+// whole slot and overflow the artwork.
+const spineRatioReady = computed(() => effectiveMode.value !== 'blurred-fit' || (imageRatio.value !== null && imageRatio.value > 0))
+const showSpineLayer = computed(() => spineMode.value !== 'off' && canRenderImage.value && loaded.value && spineRatioReady.value)
 
 const frameStyle = computed(() => {
   if (useNaturalFrame.value) return fittedCoverFrameStyle(imageRatio.value, slotRatio.value, 'bottom')
@@ -73,10 +92,16 @@ const spineStyle = computed(() => {
   return { inset: '0' }
 })
 
+function restoreFromCoverCache() {
+  const cached = getCachedCoverRatio(props.src)
+  instant.value = cached !== null
+  loaded.value = instant.value
+  imageRatio.value = cached?.ratio ?? null
+}
+
 function resetImageState() {
-  loaded.value = false
   failed.value = false
-  imageRatio.value = null
+  restoreFromCoverCache()
 }
 
 watch(() => [props.src, props.hasCover, props.resetKey] as const, resetImageState)
@@ -94,6 +119,7 @@ function handleImageRef(el: Element | ComponentPublicInstance | null) {
     const ratio = updateImageRatio(img)
     loaded.value = true
     failed.value = false
+    rememberLoadedCover(props.src, ratio)
     emit('load', ratio)
   }
 }
@@ -102,6 +128,7 @@ function handleImageLoad(event: Event) {
   const ratio = updateImageRatio(event.target as HTMLImageElement | null)
   loaded.value = true
   failed.value = false
+  rememberLoadedCover(props.src, ratio)
   emit('load', ratio)
 }
 
@@ -117,14 +144,11 @@ function handleImageError() {
   <template v-if="canRenderImage">
     <span
       :class="[
-        'absolute inset-0 z-0 transition-opacity duration-200 ease-out',
+        'absolute inset-0 z-0 animate-pulse bg-foreground/5 transition-opacity duration-200 ease-out',
         loaded ? 'opacity-0 pointer-events-none' : 'opacity-100',
-        effectiveMode === 'natural-bottom' ? 'book-cover-artwork-placeholder-natural overflow-hidden rounded-[inherit]' : '',
       ]"
       aria-hidden="true"
-    >
-      <BookCoverPlaceholder :title="title" :author-line="authorLine" :is-audio="isAudio" :seed="seed" />
-    </span>
+    />
     <img
       v-if="showBlurredBackdrop"
       :src="src ?? ''"
@@ -143,7 +167,8 @@ function handleImageError() {
         :loading="loading"
         :decoding="decoding"
         :class="[
-          'absolute inset-0 h-full w-full transition-opacity duration-300 ease-out',
+          'absolute inset-0 h-full w-full',
+          instant ? '' : 'transition-opacity duration-300 ease-out',
           imageFitClass,
           loaded ? 'opacity-100' : 'opacity-0',
           imageClass,
@@ -151,9 +176,8 @@ function handleImageError() {
         @load="handleImageLoad"
         @error="handleImageError"
       />
-      <span v-if="showSpineLayer" class="book-cover-spine-layer absolute inset-0 z-[3]" :style="spineStyle" />
+      <span v-if="showSpineLayer" class="book-cover-spine-layer absolute inset-0 z-[3]" :data-cover-spine="spineMode" :style="spineStyle" />
     </span>
-    <span v-if="!loaded" class="absolute inset-0 z-[2] animate-pulse bg-foreground/5" />
   </template>
   <span
     v-else

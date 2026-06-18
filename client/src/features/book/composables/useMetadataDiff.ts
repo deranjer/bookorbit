@@ -96,6 +96,8 @@ export interface MetadataPatch {
   koboId?: string | null
   comicvineId?: string | null
   ranobedbId?: string | null
+  lubimyczytacId?: string | null
+  aladinId?: string | null
   comicMetadata?: ComicMetadataFields
 }
 
@@ -158,6 +160,8 @@ export type ProviderIdPatchField =
   | 'koboId'
   | 'comicvineId'
   | 'ranobedbId'
+  | 'lubimyczytacId'
+  | 'aladinId'
 
 export const PROVIDER_ID_FIELD: Record<MetadataProviderKey, ProviderIdPatchField | undefined> = {
   google: 'googleBooksId',
@@ -171,6 +175,8 @@ export const PROVIDER_ID_FIELD: Record<MetadataProviderKey, ProviderIdPatchField
   comicvine: 'comicvineId',
   ranobedb: 'ranobedbId',
   kobo: 'koboId',
+  lubimyczytac: 'lubimyczytacId',
+  aladin: 'aladinId',
 }
 
 const PROVIDER_ID_PATCH_FIELDS = new Set<string>(Object.values(PROVIDER_ID_FIELD).filter((v): v is ProviderIdPatchField => v !== undefined))
@@ -191,6 +197,8 @@ export const PROVIDER_ID_LABEL: Record<MetadataProviderKey, string> = {
   comicvine: 'ComicVine ID',
   ranobedb: 'RanobeDB ID',
   kobo: 'Kobo ID',
+  lubimyczytac: 'LubimyCzytac ID',
+  aladin: 'Aladin ID',
 }
 
 export function getCandidateValueFrom(candidate: MetadataCandidate, key: DiffFieldKey): string {

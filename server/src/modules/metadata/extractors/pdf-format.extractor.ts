@@ -37,6 +37,8 @@ export class PdfFormatExtractor implements FormatExtractor {
       openLibraryId: pdf.openLibraryId,
       ranobedbId: pdf.ranobedbId,
       koboId: pdf.koboId,
+      lubimyczytacId: pdf.lubimyczytacId,
+      aladinId: pdf.aladinId,
       itunesId: pdf.itunesId,
       cover: pdf.coverBuffer,
       pageCount: pdf.pageCount,

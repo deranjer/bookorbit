@@ -4,6 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BookCard } from '@bookorbit/types'
 import { useBookNavigation } from '../useBookNavigation'
 import { useBookViewContext } from '../useBookViewContext'
+import type { BookPlaceholder, BookSlot } from '../useBookWindow'
+
+function placeholder(id: number): BookPlaceholder {
+  return { id, placeholder: true }
+}
 
 function makeBook(id: number): BookCard {
   return {
@@ -65,5 +70,77 @@ describe('useBookViewContext', () => {
 
     expect(loadMore).toHaveBeenCalledTimes(1)
     expect(nextId).toBe(3)
+  })
+
+  it('advances across a block boundary when load-more resolves asynchronously', async () => {
+    const nav = useBookNavigation()
+    // 100 contiguous loaded slots (indexes 0..99); book 100 is the last loaded
+    // of the first block, with 900 more still to load.
+    const slots = ref<BookSlot[]>(Array.from({ length: 100 }, (_, i) => makeBook(i + 1)))
+    const total = ref(1000)
+
+    let releaseLoad: (() => void) | undefined
+    const loadMore = vi.fn<() => Promise<void>>(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseLoad = () => {
+            slots.value = [...slots.value, ...Array.from({ length: 100 }, (_, i) => makeBook(i + 101))]
+            resolve()
+          }
+        }),
+    )
+
+    const Harness = defineComponent({
+      setup() {
+        useBookViewContext(slots, total, loadMore)
+        return {}
+      },
+      template: '<div />',
+    })
+
+    const wrapper = mount(Harness)
+    // Mirror real navigation: the grid/list view unmounts when the editor opens.
+    wrapper.unmount()
+
+    const nextPromise = nav.getNextId(100)
+    await Promise.resolve()
+    // The next block is still loading, so the id is not resolved synchronously.
+    expect(releaseLoad).toBeDefined()
+    releaseLoad?.()
+
+    expect(await nextPromise).toBe(101)
+    expect(loadMore).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports the absolute slot index after a jump rail loads a far block', async () => {
+    const nav = useBookNavigation()
+    // First block (rows 0-1) plus a far block (rows 5000-5001) loaded; the
+    // rows in between are still placeholders, as after a jump to "Z".
+    const slots = ref<BookSlot[]>([
+      makeBook(1),
+      makeBook(2),
+      ...Array.from({ length: 4998 }, (_, i) => placeholder(-(i + 1))),
+      makeBook(5001),
+      makeBook(5002),
+    ])
+    const total = ref(5002)
+    const loadMore = vi.fn<() => Promise<void>>(async () => {})
+
+    const Harness = defineComponent({
+      setup() {
+        useBookViewContext(slots, total, loadMore)
+        return {}
+      },
+      template: '<div />',
+    })
+
+    const wrapper = mount(Harness)
+
+    expect(nav.currentIndex(5001)).toBe(5000)
+    expect(nav.currentIndex(5002)).toBe(5001)
+    expect(nav.currentIndex(1)).toBe(0)
+    expect(nav.total.value).toBe(5002)
+
+    wrapper.unmount()
   })
 })

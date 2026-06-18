@@ -15,6 +15,7 @@ import { UpdateBookMetadataDto } from './dto/update-book-metadata.dto';
 import { BulkEditFieldsDto } from './dto/bulk-edit-metadata.dto';
 import { BookQueryBuilder } from './book-query-builder.service';
 import { BookService } from './book.service';
+import { BookMetadataLockService } from '../book-metadata-lock/book-metadata-lock.service';
 import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
 
 vi.mock('fs/promises', async () => {
@@ -103,7 +104,7 @@ function makeMetadataFetchDiagnostics(overrides: Partial<MetadataFetchDiagnostic
   };
 }
 
-function makeService() {
+function makeService(overrides: { bookMetadataLockService?: unknown } = {}) {
   const bookRepo = {
     findCards: vi.fn(),
     countWhere: vi.fn(),
@@ -140,6 +141,8 @@ function makeService() {
     findAllIds: vi.fn(),
     findIdsByWhere: vi.fn(),
     findCardsCollapsed: vi.fn(),
+    findJumpBuckets: vi.fn(),
+    findJumpBucketsCollapsed: vi.fn(),
     checkBookPassesContentFilters: vi.fn().mockResolvedValue(true),
   };
   const libraryService = {
@@ -200,7 +203,6 @@ function makeService() {
     normalizeLockedFields: vi.fn().mockImplementation((fields: string[] | null | undefined) => fields ?? []),
     isFieldLocked: vi.fn().mockResolvedValue(false),
     assertManualUpdateAllowed: vi.fn().mockResolvedValue(undefined),
-    assertManualUpdateAllowedForLockTransition: vi.fn().mockResolvedValue(undefined),
     filterResolvedMetadata: vi.fn().mockImplementation((_bookId: number, resolved: unknown, providerIds: unknown) =>
       Promise.resolve({
         resolved,
@@ -242,7 +244,7 @@ function makeService() {
     userBookStatusService as never,
     narratorService as never,
     comicMetadataService as never,
-    bookMetadataLockService as never,
+    (overrides.bookMetadataLockService ?? bookMetadataLockService) as never,
     embedder as never,
     fileWriteService as never,
     fileRenameService as never,
@@ -1291,9 +1293,6 @@ describe('BookService', () => {
         user,
       );
 
-      expect(bookMetadataLockService.assertManualUpdateAllowedForLockTransition).toHaveBeenCalledWith(5, { goodreadsId: 'manual-goodreads-id' }, [
-        'goodreadsId',
-      ]);
       expect(bookRepo.updateMetadataFields).toHaveBeenCalledWith(
         5,
         expect.objectContaining({
@@ -1306,26 +1305,27 @@ describe('BookService', () => {
       expect(result).toEqual({ book: { id: 5, lockedFields: ['goodreadsId'] }, write: null, libraryAutoWriteEnabled: false });
     });
 
-    it('updateMetadataAndLocks rejects fields locked before and after without opening a transaction', async () => {
-      const { service, bookRepo, bookMetadataLockService } = makeService();
+    // Regression for issue #328: a field that is locked BOTH before and after the request must still be
+    // written (the unlock -> edit -> re-lock flow). Uses the real lock service so a reintroduced guard fails.
+    it('updateMetadataAndLocks writes a field that stays locked across the request', async () => {
+      const lockRepo = {
+        findLockedFields: vi.fn().mockResolvedValue(['title']),
+        findLockedFieldsByBookIds: vi.fn().mockResolvedValue(new Map()),
+        replaceLockedFields: vi.fn().mockResolvedValue(undefined),
+      };
+      const lockService = new BookMetadataLockService(lockRepo as never);
+      const { service, bookRepo } = makeService({ bookMetadataLockService: lockService });
       const user = makeUser();
-      const error = new ConflictException('Metadata fields are locked: title');
+      const tx = { id: 'tx-328' };
       vi.spyOn(service, 'verifyBookAccess').mockResolvedValue(undefined);
-      bookMetadataLockService.assertManualUpdateAllowedForLockTransition.mockRejectedValue(error);
+      vi.spyOn(service, 'getDetail').mockResolvedValue({ id: 5, lockedFields: ['title'] } as never);
+      bookRepo.withTransaction.mockImplementation(async (callback: (value: unknown) => Promise<unknown>) => callback(tx));
 
-      await expect(
-        service.updateMetadataAndLocks(
-          5,
-          {
-            metadata: { title: 'Blocked Title' },
-            lockedFields: ['title'],
-          },
-          user,
-        ),
-      ).rejects.toThrow(error);
+      const result = await service.updateMetadataAndLocks(5, { metadata: { title: 'New Title' }, lockedFields: ['title'] }, user);
 
-      expect(bookRepo.withTransaction).not.toHaveBeenCalled();
-      expect(bookMetadataLockService.replaceLockedFields).not.toHaveBeenCalled();
+      expect(bookRepo.updateMetadataFields).toHaveBeenCalledWith(5, expect.objectContaining({ title: 'New Title', updatedAt: expect.any(Date) }), tx);
+      expect(lockRepo.replaceLockedFields).toHaveBeenCalledWith(5, ['title'], tx);
+      expect(result.book).toEqual({ id: 5, lockedFields: ['title'] });
     });
 
     it('updateMetadataAndLocks can persist locks without scheduling metadata side effects', async () => {
@@ -2103,6 +2103,85 @@ describe('BookService', () => {
       expect(result.total).toBe(1);
       expect(result.items[0]!.collapsedSeries).toBeDefined();
       expect(result.items[0]!.collapsedSeries!.bookCount).toBe(3);
+    });
+
+    it('queryJumpBucketsForLibrary verifies access and delegates to findJumpBuckets', async () => {
+      const { service, libraryService, queryBuilder, bookRepo } = makeService();
+      const user = makeUser({ id: 42 });
+      queryBuilder.buildWhere.mockReturnValue('WHERE' as never);
+      queryBuilder.buildOrderBy.mockReturnValue(['ORDER'] as never);
+      bookRepo.findJumpBuckets.mockResolvedValue({ buckets: [{ key: 'A', label: 'A', index: 0 }], total: 12 });
+
+      const result = await service.queryJumpBucketsForLibrary(user, 7, {
+        sort: [{ field: 'title', dir: 'asc' }],
+        pagination: { page: 0, size: 50 },
+      } as never);
+
+      expect(libraryService.verifyUserAccess).toHaveBeenCalledWith(42, 7, false);
+      expect(queryBuilder.buildOrderBy).toHaveBeenCalledWith([{ field: 'title', dir: 'asc' }], 42);
+      expect(bookRepo.findJumpBuckets).toHaveBeenCalledWith(expect.objectContaining({ where: 'WHERE', orderBy: ['ORDER'] }));
+      expect(bookRepo.findJumpBucketsCollapsed).not.toHaveBeenCalled();
+      expect(result).toEqual({ buckets: [{ key: 'A', label: 'A', index: 0 }], total: 12 });
+    });
+
+    it('executeJumpBucketsQuery rejects ineligible sorts with BadRequestException', async () => {
+      const { service, bookRepo } = makeService();
+
+      await expect(
+        service.executeJumpBucketsQuery(1, undefined, {
+          sort: [{ field: 'addedAt', dir: 'desc' }],
+          pagination: { page: 0, size: 50 },
+        } as never),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(bookRepo.findJumpBuckets).not.toHaveBeenCalled();
+      expect(bookRepo.findJumpBucketsCollapsed).not.toHaveBeenCalled();
+    });
+
+    it('executeJumpBucketsQuery supports author and publishedYear sorts in both directions', async () => {
+      const { service, queryBuilder, bookRepo } = makeService();
+      queryBuilder.buildOrderBy.mockReturnValue(['ORDER'] as never);
+      bookRepo.findJumpBuckets.mockResolvedValue({ buckets: [], total: 0 });
+
+      for (const sort of [[{ field: 'author', dir: 'desc' }], [{ field: 'publishedYear', dir: 'asc' }], [{ field: 'title', dir: 'desc' }], []]) {
+        await service.executeJumpBucketsQuery(1, undefined, { sort, pagination: { page: 0, size: 50 } } as never);
+      }
+      expect(bookRepo.findJumpBuckets).toHaveBeenCalledTimes(4);
+    });
+
+    it('executeJumpBucketsQuery routes to the collapsed variant when collapseSeries is set', async () => {
+      const { service, bookRepo } = makeService();
+      bookRepo.findJumpBucketsCollapsed.mockResolvedValue({ buckets: [], total: 0 });
+
+      await service.executeJumpBucketsQuery(
+        9,
+        'WHERE' as never,
+        {
+          sort: [{ field: 'title', dir: 'asc' }],
+          pagination: { page: 0, size: 50 },
+          collapseSeries: true,
+        } as never,
+      );
+
+      expect(bookRepo.findJumpBucketsCollapsed).toHaveBeenCalledWith(
+        expect.objectContaining({ where: 'WHERE', sort: [{ field: 'title', dir: 'asc' }], userId: 9 }),
+      );
+      expect(bookRepo.findJumpBuckets).not.toHaveBeenCalled();
+    });
+
+    it('executeJumpBucketsQuery ignores collapseSeries when the filter targets a series', async () => {
+      const { service, queryBuilder, bookRepo } = makeService();
+      queryBuilder.buildOrderBy.mockReturnValue(['ORDER'] as never);
+      bookRepo.findJumpBuckets.mockResolvedValue({ buckets: [], total: 0 });
+
+      await service.executeJumpBucketsQuery(9, undefined, {
+        sort: [{ field: 'title', dir: 'asc' }],
+        pagination: { page: 0, size: 50 },
+        collapseSeries: true,
+        filter: { type: 'group', join: 'AND', rules: [{ type: 'rule', field: 'series', operator: 'eq', value: 'Dune' }] },
+      } as never);
+
+      expect(bookRepo.findJumpBuckets).toHaveBeenCalled();
+      expect(bookRepo.findJumpBucketsCollapsed).not.toHaveBeenCalled();
     });
 
     it('queryForLibrary uses normal findCards when collapseSeries is false', async () => {

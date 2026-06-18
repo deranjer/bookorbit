@@ -1,13 +1,23 @@
 <script setup lang="ts">
-import { reactive, computed, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import ChipInput from '@/components/ui/ChipInput.vue'
 import InputWithSuggestions from '@/components/ui/InputWithSuggestions.vue'
+import SeriesMembershipEditor from '@/features/book/components/detail/tabs/SeriesMembershipEditor.vue'
 import { useAuthorSearch } from '@/features/book/composables/useAuthorSearch'
 import { useGenreSearch, useTagSearch } from '@/features/book/composables/useTagSearch'
 import { useNarratorSearch } from '@/features/book/composables/useNarratorSearch'
 import { usePublisherSearch, useSeriesNameSearch, useLanguageSearch } from '@/features/book/composables/useMetadataFieldSearch'
 import type { BulkEditFields, ArrayMode } from '@/features/book/composables/useBulkEditMetadata'
+import { normalizeSeriesMemberships, type EditableSeriesMembership } from '@/features/book/composables/useMetadataEditor'
+import {
+  BULK_EDITABLE_ARRAY_FIELDS,
+  BULK_EDITABLE_SCALAR_FIELDS,
+  BULK_EDITABLE_FIELD_LABELS,
+  type BulkEditableArrayField,
+  type BulkEditableScalarField,
+  type BulkEditableField,
+} from '@/features/book/composables/useBookBulkActions'
 
 type UIArrayMode = ArrayMode | 'clear'
 
@@ -22,23 +32,14 @@ const emit = defineEmits<{
   confirm: [fields: BulkEditFields]
 }>()
 
-const ARRAY_FIELDS = ['authors', 'genres', 'tags', 'narrators'] as const
-const SCALAR_FIELDS = ['seriesName', 'publisher', 'language', 'publishedYear'] as const
+const ARRAY_FIELDS = BULK_EDITABLE_ARRAY_FIELDS
+const SCALAR_FIELDS = BULK_EDITABLE_SCALAR_FIELDS
 
-type ArrayFieldKey = (typeof ARRAY_FIELDS)[number]
-type ScalarFieldKey = (typeof SCALAR_FIELDS)[number]
-type FieldKey = ArrayFieldKey | ScalarFieldKey
+type ArrayFieldKey = BulkEditableArrayField
+type ScalarFieldKey = BulkEditableScalarField
+type FieldKey = BulkEditableField
 
-const FIELD_LABELS: Record<FieldKey, string> = {
-  authors: 'Authors',
-  genres: 'Genres',
-  tags: 'Tags',
-  narrators: 'Narrators',
-  seriesName: 'Series',
-  publisher: 'Publisher',
-  language: 'Language',
-  publishedYear: 'Year',
-}
+const FIELD_LABELS = BULK_EDITABLE_FIELD_LABELS
 
 const MODE_LABELS: Record<UIArrayMode, string> = {
   add: 'Add',
@@ -99,6 +100,7 @@ const scalarValues = reactive<Record<ScalarFieldKey, string>>({
   language: '',
   publishedYear: '',
 })
+const seriesMembershipValues = ref<EditableSeriesMembership[]>([])
 
 const hasAnyEnabledField = computed(() => Object.values(enabledFields).some(Boolean))
 
@@ -137,6 +139,10 @@ function buildFields(): BulkEditFields {
 
   for (const key of SCALAR_FIELDS) {
     if (!enabledFields[key]) continue
+    if (key === 'seriesName') {
+      fields.seriesMemberships = normalizeSeriesMemberships(seriesMembershipValues.value)
+      continue
+    }
     if (key === 'publishedYear') {
       const num = scalarValues[key].trim() ? parseInt(scalarValues[key], 10) : null
       fields[key] = { value: num !== null && Number.isNaN(num) ? null : num }
@@ -164,6 +170,7 @@ function resetForm() {
   for (const key of SCALAR_FIELDS) {
     scalarValues[key] = ''
   }
+  seriesMembershipValues.value = []
 }
 
 function handleClose() {
@@ -177,6 +184,10 @@ function toggleField(key: FieldKey) {
 
 function setArrayMode(key: ArrayFieldKey, mode: UIArrayMode) {
   arrayModes[key] = mode
+}
+
+function handleSeriesMembershipsUpdate(values: EditableSeriesMembership[]) {
+  seriesMembershipValues.value = values
 }
 
 watch(
@@ -292,8 +303,14 @@ watch(
             </button>
 
             <div v-if="enabledFields[key]" class="pl-6">
+              <SeriesMembershipEditor
+                v-if="key === 'seriesName'"
+                :model-value="seriesMembershipValues"
+                :search-fn="searchSeries"
+                @update:model-value="handleSeriesMembershipsUpdate"
+              />
               <InputWithSuggestions
-                v-if="SUGGESTION_FNS[key]"
+                v-else-if="SUGGESTION_FNS[key]"
                 :model-value="scalarValues[key] || null"
                 :search-fn="SUGGESTION_FNS[key]!"
                 :placeholder="`Enter ${FIELD_LABELS[key].toLowerCase()}`"

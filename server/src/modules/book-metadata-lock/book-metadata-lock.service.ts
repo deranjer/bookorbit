@@ -19,6 +19,8 @@ const PROVIDER_ID_LOCK_FIELDS_BY_PROVIDER: Partial<Record<MetadataProviderKey, B
   [MetadataProviderKey.KOBO]: 'koboId',
   [MetadataProviderKey.COMICVINE]: 'comicvineId',
   [MetadataProviderKey.RANOBEDB]: 'ranobedbId',
+  [MetadataProviderKey.LUBIMYCZYTAC]: 'lubimyczytacId',
+  [MetadataProviderKey.ALADIN]: 'aladinId',
 };
 
 const COMIC_METADATA_LOCK_FIELDS: Record<keyof ComicMetadataFields, BookMetadataLockField> = {
@@ -115,17 +117,6 @@ export class BookMetadataLockService {
     await this.assertFieldsUnlocked(bookId, this.getFieldsTargetedByBookUpdate(dto));
   }
 
-  async assertManualUpdateAllowedForLockTransition(bookId: number, dto: UpdateBookMetadataDto, nextLockedFields: readonly string[]): Promise<void> {
-    const currentlyLocked = new Set(await this.getLockedFields(bookId));
-    const nextLocked = new Set(this.normalizeLockedFields(nextLockedFields));
-    const lockedBeforeAndAfter = [...currentlyLocked].filter((field) => nextLocked.has(field));
-    const targetedFields = this.getFieldsTargetedByBookUpdate(dto);
-    const blockedFields = targetedFields.filter((field) => lockedBeforeAndAfter.includes(field));
-    if (blockedFields.length === 0) return;
-
-    throw new ConflictException(`Metadata fields are locked: ${blockedFields.join(', ')}`);
-  }
-
   async filterAutomatedBookUpdate(
     bookId: number,
     dto: UpdateBookMetadataDto,
@@ -155,8 +146,15 @@ export class BookMetadataLockService {
     this.copyResolvedField(filteredResolved, resolved, 'publishedYear', 'publishedYear', lockedSet, skippedFields);
     this.copyResolvedField(filteredResolved, resolved, 'language', 'language', lockedSet, skippedFields);
     this.copyResolvedField(filteredResolved, resolved, 'pageCount', 'pageCount', lockedSet, skippedFields);
-    this.copyResolvedField(filteredResolved, resolved, 'seriesName', 'seriesName', lockedSet, skippedFields);
-    this.copyResolvedField(filteredResolved, resolved, 'seriesIndex', 'seriesIndex', lockedSet, skippedFields);
+    if (resolved.seriesName !== undefined || resolved.seriesIndex !== undefined) {
+      if (lockedSet.has('seriesName') || lockedSet.has('seriesIndex')) {
+        if (lockedSet.has('seriesName')) skippedFields.add('seriesName');
+        if (lockedSet.has('seriesIndex')) skippedFields.add('seriesIndex');
+      } else {
+        if (resolved.seriesName !== undefined) filteredResolved.seriesName = resolved.seriesName;
+        if (resolved.seriesIndex !== undefined) filteredResolved.seriesIndex = resolved.seriesIndex;
+      }
+    }
     this.copyResolvedField(filteredResolved, resolved, 'genres', 'genres', lockedSet, skippedFields);
     this.copyResolvedField(filteredResolved, resolved, 'narrators', 'narrators', lockedSet, skippedFields);
     this.copyResolvedField(filteredResolved, resolved, 'duration', 'durationSeconds', lockedSet, skippedFields);
@@ -223,8 +221,17 @@ export class BookMetadataLockService {
     this.copyUpdateField(filteredDto, dto, 'publishedYear', 'publishedYear', lockedSet, skippedFields);
     this.copyUpdateField(filteredDto, dto, 'language', 'language', lockedSet, skippedFields);
     this.copyUpdateField(filteredDto, dto, 'pageCount', 'pageCount', lockedSet, skippedFields);
-    this.copyUpdateField(filteredDto, dto, 'seriesName', 'seriesName', lockedSet, skippedFields);
-    this.copyUpdateField(filteredDto, dto, 'seriesIndex', 'seriesIndex', lockedSet, skippedFields);
+    if (dto.seriesMemberships !== undefined || dto.seriesName !== undefined || dto.seriesIndex !== undefined) {
+      if (lockedSet.has('seriesName') || lockedSet.has('seriesIndex')) {
+        if (lockedSet.has('seriesName')) skippedFields.add('seriesName');
+        if (lockedSet.has('seriesIndex')) skippedFields.add('seriesIndex');
+      } else if (dto.seriesMemberships !== undefined) {
+        filteredDto.seriesMemberships = dto.seriesMemberships;
+      } else {
+        if (dto.seriesName !== undefined) filteredDto.seriesName = dto.seriesName;
+        if (dto.seriesIndex !== undefined) filteredDto.seriesIndex = dto.seriesIndex;
+      }
+    }
     this.copyUpdateField(filteredDto, dto, 'isbn10', 'isbn10', lockedSet, skippedFields);
     this.copyUpdateField(filteredDto, dto, 'isbn13', 'isbn13', lockedSet, skippedFields);
     this.copyUpdateField(filteredDto, dto, 'rating', 'rating', lockedSet, skippedFields);
@@ -241,6 +248,8 @@ export class BookMetadataLockService {
     this.copyUpdateField(filteredDto, dto, 'koboId', 'koboId', lockedSet, skippedFields);
     this.copyUpdateField(filteredDto, dto, 'comicvineId', 'comicvineId', lockedSet, skippedFields);
     this.copyUpdateField(filteredDto, dto, 'ranobedbId', 'ranobedbId', lockedSet, skippedFields);
+    this.copyUpdateField(filteredDto, dto, 'lubimyczytacId', 'lubimyczytacId', lockedSet, skippedFields);
+    this.copyUpdateField(filteredDto, dto, 'aladinId', 'aladinId', lockedSet, skippedFields);
 
     if (dto.audioMetadata) {
       const filteredAudioMetadata: NonNullable<UpdateBookMetadataDto['audioMetadata']> = {};
@@ -350,6 +359,10 @@ export class BookMetadataLockService {
     this.addFieldIfPresent(fields, dto, 'pageCount', 'pageCount');
     this.addFieldIfPresent(fields, dto, 'seriesName', 'seriesName');
     this.addFieldIfPresent(fields, dto, 'seriesIndex', 'seriesIndex');
+    if (dto.seriesMemberships !== undefined) {
+      fields.add('seriesName');
+      fields.add('seriesIndex');
+    }
     this.addFieldIfPresent(fields, dto, 'isbn10', 'isbn10');
     this.addFieldIfPresent(fields, dto, 'isbn13', 'isbn13');
     this.addFieldIfPresent(fields, dto, 'rating', 'rating');
@@ -366,6 +379,8 @@ export class BookMetadataLockService {
     this.addFieldIfPresent(fields, dto, 'koboId', 'koboId');
     this.addFieldIfPresent(fields, dto, 'comicvineId', 'comicvineId');
     this.addFieldIfPresent(fields, dto, 'ranobedbId', 'ranobedbId');
+    this.addFieldIfPresent(fields, dto, 'lubimyczytacId', 'lubimyczytacId');
+    this.addFieldIfPresent(fields, dto, 'aladinId', 'aladinId');
 
     if (dto.audioMetadata) {
       this.addFieldIfPresent(fields, dto.audioMetadata, 'narrators', 'narrators');

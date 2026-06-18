@@ -6,10 +6,10 @@ import { computed, inject, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   BookOpen,
+  BookText,
   Check,
   Download,
   Eye,
-  ExternalLink,
   FolderPlus,
   Image,
   Lock,
@@ -75,6 +75,7 @@ const authorQuery = computed(() => props.book.authors[0] ?? null)
 const readableFiles = computed(() => props.book.files.filter((f) => f.format && READER_OPENABLE_FORMATS.has(f.format)))
 const primaryFile = computed(() => readableFiles.value.find((f) => f.role === 'primary') ?? readableFiles.value[0] ?? null)
 const isAudiobook = computed(() => readableFiles.value.some((f) => FORMAT_TO_GROUP[f.format!] === 'audio'))
+const isComic = computed(() => readableFiles.value.some((f) => FORMAT_TO_GROUP[f.format!] === 'cbx'))
 
 // For multi-file audiobooks, collapse all tracks into one representative entry.
 // The audio reader loads the full track queue from the book, so opening any track is equivalent.
@@ -255,6 +256,26 @@ function handleSecondaryLabelClick(event: MouseEvent) {
 }
 
 const isPrimaryClickAvailable = computed(() => thumbnailClickAction.value === 'details' || (primaryFile.value != null && !isMissing.value))
+const showPrimaryOverlayAction = computed(() => thumbnailClickAction.value === 'details' || (primaryFile.value != null && !isMissing.value))
+const primaryOverlayActionIcon = computed(() => {
+  if (thumbnailClickAction.value === 'details') return BookText
+  return isAudiobook.value ? Play : BookOpen
+})
+const primaryOverlayActionIconClass = computed(() => (thumbnailClickAction.value !== 'details' && isAudiobook.value ? 'ml-[2cqi]' : ''))
+const showExplicitReadButton = computed(() => thumbnailClickAction.value === 'details' && primaryFile.value != null && !isMissing.value)
+
+function handlePrimaryOverlayAction() {
+  if (thumbnailClickAction.value === 'details') {
+    openBookDetails()
+    return
+  }
+
+  if (primaryFile.value && !isMissing.value) openFile(primaryFile.value)
+}
+
+function openPrimaryFileExplicit() {
+  if (primaryFile.value && !isMissing.value) openFile(primaryFile.value)
+}
 
 function handleCardClick(event: MouseEvent) {
   const target = event.target
@@ -376,6 +397,7 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
         :class="isMissing || selectionMode ? '' : 'group-hover:scale-[1.02]'"
         :interactive="!isMissing && !selectionMode"
         :disable-spine="isAudiobook"
+        :is-comic="isComic"
         :style="{ aspectRatio: effectiveCoverAspectRatio }"
       >
         <!-- Missing border overlay: mirror selected overlay pattern so border is never clipped/hidden -->
@@ -392,6 +414,7 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
           :frame-aspect-ratio="effectiveCoverAspectRatio"
           :image-class="isMissing ? 'brightness-50' : ''"
           :spine="!isAudiobook"
+          :is-comic="isComic"
           @load="handleArtworkLoad"
           @error="handleArtworkError"
         />
@@ -502,22 +525,30 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
               showMobileOverlay ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto',
             ]"
           >
-            <!-- Top row: Quick View -->
-            <div class="shrink-0 flex justify-end">
+            <!-- Top row: Quick View + explicit Read (when thumbnail click prefers details) -->
+            <div class="shrink-0 flex items-center justify-end gap-1">
               <button class="p-[3cqi] rounded-[2.5cqi] bg-black/50 hover:bg-black/30 transition-colors text-white" @click="openQuickView">
                 <PanelRight class="size-[12cqi]" />
               </button>
+              <button
+                v-if="showExplicitReadButton"
+                class="p-[3cqi] rounded-[2.5cqi] bg-black/50 hover:bg-black/30 transition-colors text-white"
+                @click.stop="openPrimaryFileExplicit"
+              >
+                <BookOpen class="size-[12cqi]" />
+              </button>
             </div>
 
-            <!-- Center: Play/Read button -->
+            <!-- Center: primary thumbnail action -->
             <div class="flex-1 flex items-center justify-center">
               <button
-                v-if="primaryFile && !isMissing"
+                v-if="showPrimaryOverlayAction"
+                data-testid="grid-card-primary-action"
                 class="size-[30cqi] flex items-center justify-center rounded-full bg-primary text-white shadow-2xl transition-all duration-300 scale-75 hover:scale-110 active:scale-90"
                 :class="[showMobileOverlay || 'group-hover:scale-100', showMobileOverlay ? 'scale-100' : '']"
-                @click.stop="openFile(primaryFile)"
+                @click.stop="handlePrimaryOverlayAction"
               >
-                <component :is="isAudiobook ? Play : BookOpen" class="size-[16cqi]" :class="{ 'ml-[2cqi]': isAudiobook }" />
+                <component :is="primaryOverlayActionIcon" class="size-[16cqi]" :class="primaryOverlayActionIconClass" />
               </button>
             </div>
 
@@ -593,7 +624,7 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                   </DropdownMenuSub>
 
                   <DropdownMenuItem @click="openBookDetails">
-                    <ExternalLink class="size-4 mr-2" />
+                    <BookText class="size-4 mr-2" />
                     Book Details
                   </DropdownMenuItem>
                   <DropdownMenuSeparator v-if="hasPermission('library_edit_metadata')" />
@@ -727,7 +758,7 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
             </DropdownMenuSub>
 
             <DropdownMenuItem @click="openBookDetails">
-              <ExternalLink class="size-4 mr-2" />
+              <BookText class="size-4 mr-2" />
               Book Details
             </DropdownMenuItem>
             <DropdownMenuSeparator v-if="hasPermission('library_edit_metadata')" />

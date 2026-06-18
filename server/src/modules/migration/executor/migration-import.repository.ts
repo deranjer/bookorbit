@@ -3,8 +3,10 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import { DB } from '../../../db';
+import { refreshPrimaryAuthorSortNamesForAuthors, refreshPrimaryAuthorSortNamesForBooks } from '../../../db/book-author-sort-key';
 import * as schema from '../../../db/schema';
 import { SeriesIdentityService } from '../../../common/services/series-identity.service';
+import { SeriesMembershipService } from '../../../common/services/series-membership.service';
 import { uniqueNumbers } from './executor-utils';
 
 type Db = NodePgDatabase<typeof schema>;
@@ -73,26 +75,35 @@ export class MigrationImportRepository {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Optional() private readonly seriesIdentity?: SeriesIdentityService,
+    @Optional() private readonly seriesMemberships?: SeriesMembershipService,
   ) {}
 
   async withTransaction<T>(handler: (repo: MigrationImportRepository) => Promise<T>): Promise<T> {
-    return this.db.transaction(async (tx) => handler(new MigrationImportRepository(tx as unknown as Db, this.seriesIdentity)));
+    return this.db.transaction(async (tx) =>
+      handler(new MigrationImportRepository(tx as unknown as Db, this.seriesIdentity, this.seriesMemberships)),
+    );
   }
 
   // --- Metadata ---
 
   async upsertBookMetadata(bookId: number, values: Partial<typeof schema.bookMetadata.$inferInsert>): Promise<void> {
+    const shouldSyncSeries =
+      Object.prototype.hasOwnProperty.call(values, 'seriesName') || Object.prototype.hasOwnProperty.call(values, 'seriesIndex');
     const patch = (await this.seriesIdentity?.resolveMetadataPatch(values, this.db)) ?? values;
     await this.db
       .insert(schema.bookMetadata)
       .values({ bookId, ...patch })
       .onConflictDoUpdate({ target: schema.bookMetadata.bookId, set: patch });
+    if (shouldSyncSeries) {
+      await this.seriesMemberships?.syncPrimaryFromMetadata(bookId, this.db);
+    }
   }
 
   // --- Authors ---
 
   async deleteBookAuthors(bookId: number): Promise<void> {
     await this.db.delete(schema.bookAuthors).where(eq(schema.bookAuthors.bookId, bookId));
+    await refreshPrimaryAuthorSortNamesForBooks(this.db, [bookId]);
   }
 
   async upsertAuthor(values: typeof schema.authors.$inferInsert): Promise<{ id: number } | null> {
@@ -101,11 +112,13 @@ export class MigrationImportRepository {
       .values(values)
       .onConflictDoUpdate({ target: schema.authors.name, set: values })
       .returning({ id: schema.authors.id });
+    if (row) await refreshPrimaryAuthorSortNamesForAuthors(this.db, [row.id]);
     return row ?? null;
   }
 
   async insertBookAuthor(bookId: number, authorId: number, displayOrder: number): Promise<void> {
     await this.db.insert(schema.bookAuthors).values({ bookId, authorId, displayOrder }).onConflictDoNothing();
+    await refreshPrimaryAuthorSortNamesForBooks(this.db, [bookId]);
   }
 
   // --- Narrators ---
@@ -299,12 +312,17 @@ export class MigrationImportRepository {
     if (items.length === 0) return;
     for (const batch of chunk(items, BATCH_CHUNK_SIZE)) {
       for (const item of batch) {
+        const shouldSyncSeries =
+          Object.prototype.hasOwnProperty.call(item, 'seriesName') || Object.prototype.hasOwnProperty.call(item, 'seriesIndex');
         const patch = (await this.seriesIdentity?.resolveMetadataPatch(item, this.db)) ?? item;
         const set = bookMetadataConflictSet(patch);
         await this.db.insert(schema.bookMetadata).values(patch).onConflictDoUpdate({
           target: schema.bookMetadata.bookId,
           set,
         });
+        if (shouldSyncSeries) {
+          await this.seriesMemberships?.syncPrimaryFromMetadata(item.bookId, this.db);
+        }
       }
     }
   }
@@ -313,6 +331,7 @@ export class MigrationImportRepository {
     if (bookIds.length === 0) return;
     for (const batch of chunk(bookIds, BATCH_CHUNK_SIZE)) {
       await this.db.delete(schema.bookAuthors).where(inArray(schema.bookAuthors.bookId, batch));
+      await refreshPrimaryAuthorSortNamesForBooks(this.db, batch);
     }
   }
 
@@ -326,6 +345,10 @@ export class MigrationImportRepository {
         .onConflictDoUpdate({ target: schema.authors.name, set: { sortName: sql`excluded.sort_name` } })
         .returning({ id: schema.authors.id, name: schema.authors.name });
       for (const row of rows) nameToId.set(row.name, row.id);
+      await refreshPrimaryAuthorSortNamesForAuthors(
+        this.db,
+        rows.map((row) => row.id),
+      );
     }
     return nameToId;
   }
@@ -334,6 +357,10 @@ export class MigrationImportRepository {
     if (items.length === 0) return;
     for (const batch of chunk(items, BATCH_CHUNK_SIZE)) {
       await this.db.insert(schema.bookAuthors).values(batch).onConflictDoNothing();
+      await refreshPrimaryAuthorSortNamesForBooks(
+        this.db,
+        batch.map((item) => item.bookId),
+      );
     }
   }
 

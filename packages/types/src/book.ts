@@ -12,6 +12,11 @@ export function isAudioFormat(format: string): boolean {
   return AUDIO_FORMATS.has(format.toLowerCase());
 }
 
+const COMIC_FORMATS = new Set<string>(["cbz", "cbr", "cb7", "cbx"]);
+export function isComicFormat(format: string): boolean {
+  return COMIC_FORMATS.has(format.toLowerCase());
+}
+
 export const READ_STATUSES = ["unread", "want_to_read", "reading", "on_hold", "rereading", "read", "skimmed", "abandoned"] as const;
 export type ReadStatus = (typeof READ_STATUSES)[number];
 export type ReadStatusSource = "auto" | "manual";
@@ -31,6 +36,13 @@ export type BookFileRef = {
   sizeBytes: number | null;
 };
 
+export type BookSeriesMembership = {
+  seriesId: number;
+  seriesName: string;
+  seriesIndex: number | null;
+  displayOrder: number;
+};
+
 export type BookCard = {
   id: number;
   status: string;
@@ -39,6 +51,7 @@ export type BookCard = {
   seriesId?: number | null;
   seriesName: string | null;
   seriesIndex: number | null;
+  seriesMemberships?: BookSeriesMembership[];
   files: BookFileRef[];
   publishedYear: number | null;
   language: string | null;
@@ -114,6 +127,7 @@ export type BookDetail = {
   seriesId?: number | null;
   seriesName: string | null;
   seriesIndex: number | null;
+  seriesMemberships?: BookSeriesMembership[];
   rating: number | null;
   coverSource: "extracted" | "custom" | null;
   providerIds: ProviderIds;
@@ -150,6 +164,7 @@ export type BookMetadataRefreshPreviewFields = {
   pageCount?: number | null;
   seriesName?: string | null;
   seriesIndex?: number | null;
+  seriesMemberships?: { seriesName: string; seriesIndex?: number | null }[] | null;
   coverUrl?: string;
   googleBooksId?: string | null;
   goodreadsId?: string | null;
@@ -161,6 +176,8 @@ export type BookMetadataRefreshPreviewFields = {
   koboId?: string | null;
   comicvineId?: string | null;
   ranobedbId?: string | null;
+  lubimyczytacId?: string | null;
+  aladinId?: string | null;
   audioMetadata?: {
     narrators?: string[];
     durationSeconds?: number | null;
@@ -216,6 +233,7 @@ export type BookRecommendation = {
   hasCover: boolean;
   authors: string[];
   isAudiobook?: boolean;
+  isComic?: boolean;
 };
 
 export type SeriesBookRecommendation = {
@@ -225,6 +243,7 @@ export type SeriesBookRecommendation = {
   hasCover: boolean;
   authors: string[];
   isAudiobook?: boolean;
+  isComic?: boolean;
 };
 
 export type CoverSearchResult = {

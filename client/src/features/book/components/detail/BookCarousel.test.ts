@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 
 import BookCarousel, { type CarouselBook } from './BookCarousel.vue'
+import { clearCoverLoadCache } from '@/features/book/lib/cover-load-cache'
 import { useDisplaySettings } from '@/composables/useDisplaySettings'
 
 const mockRouterPush = vi.fn<() => void>()
@@ -86,6 +87,7 @@ const { bookSpineOverlay } = useDisplaySettings()
 describe('BookCarousel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    clearCoverLoadCache()
     bookSpineOverlay.value = 'off'
     mockRouterPush.mockReset()
   })
@@ -241,6 +243,7 @@ describe('BookCarousel', () => {
   })
 
   it('renders fitted spine layer only for non-audiobook covers with loaded artwork', async () => {
+    bookSpineOverlay.value = 'strong'
     const wrapper = mountCarousel([
       makeBook({ id: 1, hasCover: true, isAudiobook: false }),
       makeBook({ id: 2, hasCover: true, isAudiobook: true }),
@@ -274,7 +277,7 @@ describe('BookCarousel', () => {
     const wrapper = mountCarousel(books)
     expect(wrapper.findAll('[data-book-id]').length).toBe(3)
     expect(wrapper.findAll('img').length).toBe(2)
-    expect(wrapper.findAll('[data-testid="placeholder"]').length).toBe(3)
+    expect(wrapper.findAll('[data-testid="placeholder"]').length).toBe(1)
   })
 
   it('uses book id as seed when title is null', () => {

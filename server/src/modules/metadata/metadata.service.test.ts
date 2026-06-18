@@ -134,6 +134,7 @@ const makeDb = () => {
     delete: vi.fn().mockReturnValue(deleteBuilder),
     select: vi.fn().mockReturnValue({ from: selectFrom }),
     insert: vi.fn().mockReturnValue({ values: insertValues }),
+    execute: vi.fn().mockResolvedValue({ rowCount: 0, rows: [] }),
   };
   const transaction = vi.fn().mockImplementation(async (callback: (tx: typeof db) => Promise<unknown>) => callback(db));
   db.transaction = transaction;
@@ -947,6 +948,27 @@ describe('MetadataService', () => {
     await service.extractAudioFileDuration(99, '/tmp/book.m4b');
 
     expect(updateSet).toHaveBeenCalledWith({ durationSeconds: 4321 });
+  });
+
+  it('extractAndAggregateAudioDuration writes the per-file duration before re-aggregating the total', async () => {
+    const { db } = makeDb();
+    const service = makeService(db);
+
+    const callOrder: string[] = [];
+    const extractSpy = vi.spyOn(service, 'extractAudioFileDuration').mockImplementation(() => {
+      callOrder.push('extract');
+      return Promise.resolve();
+    });
+    const aggregateSpy = vi.spyOn(service, 'aggregateAudioDuration').mockImplementation(() => {
+      callOrder.push('aggregate');
+      return Promise.resolve();
+    });
+
+    await service.extractAndAggregateAudioDuration(55, '/tmp/book.m4b');
+
+    expect(extractSpy).toHaveBeenCalledWith(55, '/tmp/book.m4b');
+    expect(aggregateSpy).toHaveBeenCalledWith(55);
+    expect(callOrder).toEqual(['extract', 'aggregate']);
   });
 
   it('replaceNarrators and upsertComicMetadata delegate to collaborators', async () => {

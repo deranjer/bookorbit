@@ -3,10 +3,11 @@ import { SQL, and, asc, count, eq, inArray, isNotNull, ne, or, sql } from 'drizz
 import { SUPPORTED_BOOK_FORMATS } from '../upload/upload-validator.service';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-import type { ContentFilterRules, SortSpec } from '@bookorbit/types';
-import { isAudioFormat } from '@bookorbit/types';
+import type { ContentFilterRules, JumpBucketsResponse, SortSpec } from '@bookorbit/types';
+import { isAudioFormat, isComicFormat } from '@bookorbit/types';
 import { buildContentFilterClauses } from '../../common/utils/content-filter-sql.utils';
 import { SeriesIdentityService } from '../../common/services/series-identity.service';
+import { SeriesMembershipService } from '../../common/services/series-membership.service';
 import { BookQueryBuilder } from './book-query-builder.service';
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
@@ -17,6 +18,8 @@ import {
   bookGenres,
   bookMetadata,
   bookNarrators,
+  bookSeries,
+  bookSeriesMemberships,
   books,
   bookTags,
   collectionBooks,
@@ -37,7 +40,7 @@ import {
 
 type Db = NodePgDatabase<typeof schema>;
 type DbTransaction = Parameters<Parameters<Db['transaction']>[0]>[0];
-type MetadataUpdateExecutor = Pick<Db, 'update' | 'insert'>;
+type MetadataUpdateExecutor = Pick<Db, 'delete' | 'insert' | 'select' | 'update'>;
 type MetadataReadExecutor = Pick<Db, 'select'>;
 type JsonObj = Record<string, unknown>;
 
@@ -88,11 +91,27 @@ type PatternMetadataRow = {
 
 const PROGRESS_EPSILON = 0.0001;
 
+// Shared between the collapsed listing query and the collapsed jump-buckets
+// query: both must pick the exact same series representative or bucket indexes
+// drift from listing offsets. Guarded by the jump-buckets invariant e2e test.
+const COLLAPSE_GROUP_KEY_SQL = `base.library_id, COALESCE(base.series_id::text, 'book_' || base.id::text)`;
+const COLLAPSE_REPRESENTATIVE_PICK_SQL = `${COLLAPSE_GROUP_KEY_SQL},
+          base.series_index ASC NULLS LAST,
+          base.added_at ASC,
+          base.id ASC`;
+
+type JumpBucketRawRow = {
+  bucket: string;
+  item_index: number | string;
+  total: number | string;
+};
+
 @Injectable()
 export class BookRepository {
   constructor(
     @Inject(DB) private readonly db: Db,
     @Optional() private readonly seriesIdentity?: SeriesIdentityService,
+    @Optional() private readonly seriesMemberships?: SeriesMembershipService,
   ) {}
 
   private visibleWhere(where: SQL | undefined): SQL {
@@ -167,66 +186,86 @@ export class BookRepository {
           updatedAt: Date;
         }[],
         narratorRows: [] as { bookId: number; name: string }[],
+        seriesMembershipRows: [] as {
+          bookId: number;
+          seriesId: number;
+          seriesName: string;
+          seriesIndex: number | null;
+          displayOrder: number;
+        }[],
       };
     }
 
-    const [authorRows, fileRows, genreRows, tagRows, narratorRows, statusRows, fileProgressRows, audiobookProgressRows] = await Promise.all([
-      this.db
-        .select({ bookId: bookAuthors.bookId, name: authors.name })
-        .from(bookAuthors)
-        .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
-        .where(inArray(bookAuthors.bookId, bookIds))
-        .orderBy(bookAuthors.displayOrder),
-      this.db
-        .select({ bookId: bookFiles.bookId, id: bookFiles.id, format: bookFiles.format, role: bookFiles.role, sizeBytes: bookFiles.sizeBytes })
-        .from(bookFiles)
-        .where(inArray(bookFiles.bookId, bookIds)),
-      this.db
-        .select({ bookId: bookGenres.bookId, name: genres.name })
-        .from(bookGenres)
-        .innerJoin(genres, eq(genres.id, bookGenres.genreId))
-        .where(inArray(bookGenres.bookId, bookIds)),
-      this.db
-        .select({ bookId: bookTags.bookId, name: tags.name })
-        .from(bookTags)
-        .innerJoin(tags, eq(tags.id, bookTags.tagId))
-        .where(inArray(bookTags.bookId, bookIds)),
-      this.db
-        .select({ bookId: bookNarrators.bookId, name: narrators.name })
-        .from(bookNarrators)
-        .innerJoin(narrators, eq(narrators.id, bookNarrators.narratorId))
-        .where(inArray(bookNarrators.bookId, bookIds))
-        .orderBy(bookNarrators.displayOrder),
-      this.db
-        .select({
-          bookId: userBookStatus.bookId,
-          status: userBookStatus.status,
-          source: userBookStatus.source,
-          startedAt: userBookStatus.startedAt,
-          finishedAt: userBookStatus.finishedAt,
-          updatedAt: userBookStatus.updatedAt,
-        })
-        .from(userBookStatus)
-        .where(and(eq(userBookStatus.userId, userId), inArray(userBookStatus.bookId, bookIds))),
-      primaryFileIds.length > 0
-        ? this.db
-            .select({
-              bookFileId: readingProgress.bookFileId,
-              percentage: readingProgress.percentage,
-              updatedAt: readingProgress.updatedAt,
-            })
-            .from(readingProgress)
-            .where(and(eq(readingProgress.userId, userId), inArray(readingProgress.bookFileId, primaryFileIds)))
-        : Promise.resolve([] as { bookFileId: number; percentage: number; updatedAt: Date }[]),
-      this.db
-        .select({
-          bookId: audiobookProgress.bookId,
-          percentage: audiobookProgress.percentage,
-          updatedAt: audiobookProgress.updatedAt,
-        })
-        .from(audiobookProgress)
-        .where(and(eq(audiobookProgress.userId, userId), inArray(audiobookProgress.bookId, bookIds))),
-    ]);
+    const [authorRows, fileRows, genreRows, tagRows, narratorRows, seriesMembershipRows, statusRows, fileProgressRows, audiobookProgressRows] =
+      await Promise.all([
+        this.db
+          .select({ bookId: bookAuthors.bookId, name: authors.name })
+          .from(bookAuthors)
+          .innerJoin(authors, eq(authors.id, bookAuthors.authorId))
+          .where(inArray(bookAuthors.bookId, bookIds))
+          .orderBy(bookAuthors.displayOrder),
+        this.db
+          .select({ bookId: bookFiles.bookId, id: bookFiles.id, format: bookFiles.format, role: bookFiles.role, sizeBytes: bookFiles.sizeBytes })
+          .from(bookFiles)
+          .where(inArray(bookFiles.bookId, bookIds)),
+        this.db
+          .select({ bookId: bookGenres.bookId, name: genres.name })
+          .from(bookGenres)
+          .innerJoin(genres, eq(genres.id, bookGenres.genreId))
+          .where(inArray(bookGenres.bookId, bookIds)),
+        this.db
+          .select({ bookId: bookTags.bookId, name: tags.name })
+          .from(bookTags)
+          .innerJoin(tags, eq(tags.id, bookTags.tagId))
+          .where(inArray(bookTags.bookId, bookIds)),
+        this.db
+          .select({ bookId: bookNarrators.bookId, name: narrators.name })
+          .from(bookNarrators)
+          .innerJoin(narrators, eq(narrators.id, bookNarrators.narratorId))
+          .where(inArray(bookNarrators.bookId, bookIds))
+          .orderBy(bookNarrators.displayOrder),
+        this.db
+          .select({
+            bookId: bookSeriesMemberships.bookId,
+            seriesId: bookSeriesMemberships.seriesId,
+            seriesName: bookSeries.name,
+            seriesIndex: bookSeriesMemberships.seriesIndex,
+            displayOrder: bookSeriesMemberships.displayOrder,
+          })
+          .from(bookSeriesMemberships)
+          .innerJoin(bookSeries, eq(bookSeries.id, bookSeriesMemberships.seriesId))
+          .where(inArray(bookSeriesMemberships.bookId, bookIds))
+          .orderBy(asc(bookSeriesMemberships.bookId), asc(bookSeriesMemberships.displayOrder), asc(bookSeriesMemberships.seriesId)),
+        this.db
+          .select({
+            bookId: userBookStatus.bookId,
+            status: userBookStatus.status,
+            source: userBookStatus.source,
+            startedAt: userBookStatus.startedAt,
+            finishedAt: userBookStatus.finishedAt,
+            updatedAt: userBookStatus.updatedAt,
+          })
+          .from(userBookStatus)
+          .where(and(eq(userBookStatus.userId, userId), inArray(userBookStatus.bookId, bookIds))),
+        primaryFileIds.length > 0
+          ? this.db
+              .select({
+                bookFileId: readingProgress.bookFileId,
+                percentage: readingProgress.percentage,
+                updatedAt: readingProgress.updatedAt,
+              })
+              .from(readingProgress)
+              .where(and(eq(readingProgress.userId, userId), inArray(readingProgress.bookFileId, primaryFileIds)))
+          : Promise.resolve([] as { bookFileId: number; percentage: number; updatedAt: Date }[]),
+        this.db
+          .select({
+            bookId: audiobookProgress.bookId,
+            percentage: audiobookProgress.percentage,
+            updatedAt: audiobookProgress.updatedAt,
+          })
+          .from(audiobookProgress)
+          .where(and(eq(audiobookProgress.userId, userId), inArray(audiobookProgress.bookId, bookIds))),
+      ]);
 
     const fileProgressById = new Map(fileProgressRows.map((row) => [row.bookFileId, row]));
     const audiobookProgressByBookId = new Map(audiobookProgressRows.map((row) => [row.bookId, row]));
@@ -247,7 +286,7 @@ export class BookRepository {
       return [{ bookFileId: book.primaryFileId, percentage: mergedPercentage }];
     });
 
-    return { authorRows, fileRows, genreRows, tagRows, progressRows, statusRows, narratorRows };
+    return { authorRows, fileRows, genreRows, tagRows, progressRows, statusRows, narratorRows, seriesMembershipRows };
   }
 
   async findCardsByBookIds(bookIds: number[], userId: number) {
@@ -261,6 +300,7 @@ export class BookRepository {
         progressRows: [],
         statusRows: [],
         narratorRows: [],
+        seriesMembershipRows: [],
         total: 0,
       };
     }
@@ -318,6 +358,7 @@ export class BookRepository {
       updatedAt: Date;
     }[];
     narratorRows: { bookId: number; name: string }[];
+    seriesMembershipRows: { bookId: number; seriesId: number; seriesName: string; seriesIndex: number | null; displayOrder: number }[];
     total: number;
   }> {
     const { where, sort, limit, offset, userId } = opts;
@@ -331,6 +372,7 @@ export class BookRepository {
           books.library_id,
           books.status,
           books.primary_file_id,
+          books.primary_author_sort_name,
           books.folder_path,
           books.added_at,
           books.updated_at,
@@ -429,7 +471,7 @@ export class BookRepository {
         WHERE sfu.rn = 1
       ),
       representatives AS (
-        SELECT DISTINCT ON (base.library_id, COALESCE(base.series_id::text, 'book_' || base.id::text))
+        SELECT DISTINCT ON (${sql.raw(COLLAPSE_GROUP_KEY_SQL)})
           base.id,
           base.status,
           base.primary_file_id,
@@ -450,6 +492,7 @@ export class BookRepository {
           base.subtitle,
           base.isbn13,
           base.metadata_score,
+          base.primary_author_sort_name AS author_sort_name,
           COALESCE(base.norm_series, lower(base.title)) AS sort_title,
           COALESCE(sa.latest_added_at, base.added_at) AS sort_added_at,
           sa.book_count,
@@ -475,12 +518,7 @@ export class BookRepository {
         LEFT JOIN series_first_unread sfu2
           ON sfu2.series_id = base.series_id
           AND sfu2.library_id = base.library_id
-        ORDER BY
-          base.library_id,
-          COALESCE(base.series_id::text, 'book_' || base.id::text),
-          base.series_index ASC NULLS LAST,
-          base.added_at ASC,
-          base.id ASC
+        ORDER BY ${sql.raw(COLLAPSE_REPRESENTATIVE_PICK_SQL)}
       )
       SELECT r.*,
         COUNT(*) OVER () AS total_count
@@ -528,6 +566,111 @@ export class BookRepository {
     return { rows: mappedRows, ...enrichment, total };
   }
 
+  async findJumpBuckets(opts: { where: SQL | undefined; bucketExpr: SQL; orderBy: SQL[] }): Promise<JumpBucketsResponse> {
+    const visibleWhere = this.visibleWhere(opts.where);
+    const result = await this.db.execute<JumpBucketRawRow>(sql`
+      WITH ordered AS (
+        SELECT
+          ${opts.bucketExpr} AS bucket,
+          (ROW_NUMBER() OVER (ORDER BY ${sql.join(opts.orderBy, sql`, `)}) - 1) AS item_index
+        FROM ${books}
+        LEFT JOIN ${bookMetadata} ON ${bookMetadata.bookId} = ${books.id}
+        WHERE ${visibleWhere}
+      )
+      SELECT bucket, min(item_index)::int AS item_index, (SELECT count(*) FROM ordered)::int AS total
+      FROM ordered
+      WHERE bucket IS NOT NULL
+      GROUP BY bucket
+      ORDER BY min(item_index)
+    `);
+
+    return this.mapJumpBucketRows(result.rows);
+  }
+
+  // The representatives CTE mirrors findCardsCollapsed's representative
+  // selection (same group key, same pick order) but only projects the columns
+  // buildCollapseOrderBy can reference as aliases or via r.* correlated
+  // subqueries.
+  async findJumpBucketsCollapsed(opts: { where: SQL | undefined; bucketExpr: SQL; sort: SortSpec[]; userId: number }): Promise<JumpBucketsResponse> {
+    const whereFragment = this.visibleWhere(opts.where);
+    const orderBy = BookQueryBuilder.buildCollapseOrderBy(opts.sort, opts.userId);
+    const result = await this.db.execute<JumpBucketRawRow>(sql`
+      WITH base_rows AS (
+        SELECT
+          books.id,
+          books.library_id,
+          books.primary_file_id,
+          books.primary_author_sort_name,
+          books.added_at,
+          books.updated_at,
+          book_metadata.title,
+          book_metadata.series_id,
+          book_metadata.series_name,
+          book_metadata.series_index,
+          book_metadata.published_year,
+          book_metadata.publisher,
+          book_metadata.page_count,
+          NULLIF(lower(btrim(book_metadata.series_name)), '') AS norm_series
+        FROM books
+        LEFT JOIN book_metadata ON book_metadata.book_id = books.id
+        WHERE ${whereFragment}
+      ),
+      series_latest AS (
+        SELECT
+          base.series_id,
+          base.library_id,
+          MAX(base.added_at) AS latest_added_at
+        FROM base_rows base
+        WHERE base.series_id IS NOT NULL
+        GROUP BY base.series_id, base.library_id
+      ),
+      representatives AS (
+        SELECT DISTINCT ON (${sql.raw(COLLAPSE_GROUP_KEY_SQL)})
+          base.id,
+          base.primary_file_id,
+          base.updated_at,
+          base.series_index,
+          base.published_year,
+          base.publisher,
+          base.page_count,
+          ubr.rating,
+          base.primary_author_sort_name AS author_sort_name,
+          COALESCE(base.norm_series, lower(base.title)) AS sort_title,
+          COALESCE(sl.latest_added_at, base.added_at) AS sort_added_at
+        FROM base_rows base
+        LEFT JOIN user_book_ratings ubr ON ubr.book_id = base.id AND ubr.user_id = ${opts.userId}
+        LEFT JOIN series_latest sl
+          ON sl.series_id = base.series_id
+          AND sl.library_id = base.library_id
+        ORDER BY ${sql.raw(COLLAPSE_REPRESENTATIVE_PICK_SQL)}
+      ),
+      ordered AS (
+        SELECT
+          ${opts.bucketExpr} AS bucket,
+          (ROW_NUMBER() OVER (ORDER BY ${sql.raw(orderBy)}) - 1) AS item_index
+        FROM representatives r
+      )
+      SELECT bucket, min(item_index)::int AS item_index, (SELECT count(*) FROM ordered)::int AS total
+      FROM ordered
+      WHERE bucket IS NOT NULL
+      GROUP BY bucket
+      ORDER BY min(item_index)
+    `);
+
+    return this.mapJumpBucketRows(result.rows);
+  }
+
+  private mapJumpBucketRows(rows: JumpBucketRawRow[]): JumpBucketsResponse {
+    return {
+      buckets: rows.map((row) => ({
+        key: row.bucket,
+        label: row.bucket,
+        index: Number(row.item_index),
+      })),
+      total: rows.length > 0 ? Number(rows[0].total) : 0,
+    };
+  }
+
   async findById(id: number) {
     const [book] = await this.db
       .select()
@@ -539,7 +682,7 @@ export class BookRepository {
 
     if (!book) return null;
 
-    const [authorRows, genreRows, tagRows, fileRows, narratorRows] = await Promise.all([
+    const [authorRows, genreRows, tagRows, fileRows, narratorRows, seriesMembershipRows] = await Promise.all([
       this.db
         .select({ id: authors.id, name: authors.name, sortName: authors.sortName })
         .from(bookAuthors)
@@ -567,9 +710,20 @@ export class BookRepository {
         .innerJoin(narrators, eq(narrators.id, bookNarrators.narratorId))
         .where(eq(bookNarrators.bookId, id))
         .orderBy(bookNarrators.displayOrder),
+      this.db
+        .select({
+          seriesId: bookSeriesMemberships.seriesId,
+          seriesName: bookSeries.name,
+          seriesIndex: bookSeriesMemberships.seriesIndex,
+          displayOrder: bookSeriesMemberships.displayOrder,
+        })
+        .from(bookSeriesMemberships)
+        .innerJoin(bookSeries, eq(bookSeries.id, bookSeriesMemberships.seriesId))
+        .where(eq(bookSeriesMemberships.bookId, id))
+        .orderBy(asc(bookSeriesMemberships.displayOrder), asc(bookSeriesMemberships.seriesId)),
     ]);
 
-    return { book, authorRows, genreRows, tagRows, fileRows, narratorRows };
+    return { book, authorRows, genreRows, tagRows, fileRows, narratorRows, seriesMembershipRows };
   }
 
   async findRatingByBookAndUser(bookId: number, userId: number): Promise<number | null> {
@@ -743,6 +897,13 @@ export class BookRepository {
       .where(sql`${authors.name} ILIKE ${pattern}`)
       .as('matched_authors');
 
+    const matchedSeries = this.db
+      .selectDistinct({ bookId: bookSeriesMemberships.bookId })
+      .from(bookSeriesMemberships)
+      .innerJoin(bookSeries, eq(bookSeries.id, bookSeriesMemberships.seriesId))
+      .where(sql`${bookSeries.name} ILIKE ${pattern}`)
+      .as('matched_series');
+
     const contentFilterClauses = contentFilters ? buildContentFilterClauses(contentFilters, this.db) : [];
 
     const rows = await this.db
@@ -758,11 +919,17 @@ export class BookRepository {
       .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
       .innerJoin(libraries, eq(libraries.id, books.libraryId))
       .leftJoin(matchedAuthors, eq(matchedAuthors.bookId, books.id))
+      .leftJoin(matchedSeries, eq(matchedSeries.bookId, books.id))
       .where(
         and(
           inArray(books.libraryId, libraryIds),
           ne(books.status, 'processing'),
-          or(sql`${bookMetadata.title} ILIKE ${pattern}`, sql`${bookMetadata.seriesName} ILIKE ${pattern}`, isNotNull(matchedAuthors.bookId)),
+          or(
+            sql`${bookMetadata.title} ILIKE ${pattern}`,
+            sql`${bookMetadata.seriesName} ILIKE ${pattern}`,
+            isNotNull(matchedAuthors.bookId),
+            isNotNull(matchedSeries.bookId),
+          ),
           ...contentFilterClauses,
         ),
       )
@@ -832,7 +999,7 @@ export class BookRepository {
 
   async findRecommendationTitlesByBookIds(
     bookIds: number[],
-  ): Promise<{ id: number; title: string | null; hasCover: boolean; authors: string[]; isAudiobook: boolean }[]> {
+  ): Promise<{ id: number; title: string | null; hasCover: boolean; authors: string[]; isAudiobook: boolean; isComic: boolean }[]> {
     if (bookIds.length === 0) return [];
 
     const [rows, authorRows] = await Promise.all([
@@ -862,6 +1029,7 @@ export class BookRepository {
       hasCover: r.coverSource !== null,
       authors: authorsByBook.get(r.id) ?? [],
       isAudiobook: r.primaryFormat != null ? isAudioFormat(r.primaryFormat) : false,
+      isComic: r.primaryFormat != null ? isComicFormat(r.primaryFormat) : false,
     }));
   }
 
@@ -1043,8 +1211,13 @@ export class BookRepository {
     fields: Partial<typeof bookMetadata.$inferInsert>,
     executor: MetadataUpdateExecutor = this.db,
   ): Promise<void> {
+    const shouldSyncSeries =
+      Object.prototype.hasOwnProperty.call(fields, 'seriesName') || Object.prototype.hasOwnProperty.call(fields, 'seriesIndex');
     const patch = (await this.seriesIdentity?.resolveMetadataPatch(fields, executor)) ?? fields;
     await executor.update(bookMetadata).set(patch).where(eq(bookMetadata.bookId, bookId));
+    if (shouldSyncSeries) {
+      await this.seriesMemberships?.syncPrimaryFromMetadata(bookId, executor);
+    }
     await executor.update(books).set({ updatedAt: new Date() }).where(eq(books.id, bookId));
   }
 
@@ -1054,8 +1227,13 @@ export class BookRepository {
     executor: MetadataUpdateExecutor = this.db,
   ): Promise<void> {
     if (bookIds.length === 0) return;
+    const shouldSyncSeries =
+      Object.prototype.hasOwnProperty.call(fields, 'seriesName') || Object.prototype.hasOwnProperty.call(fields, 'seriesIndex');
     const patch = (await this.seriesIdentity?.resolveMetadataPatch(fields, executor)) ?? fields;
     await executor.update(bookMetadata).set(patch).where(inArray(bookMetadata.bookId, bookIds));
+    if (shouldSyncSeries) {
+      await this.seriesMemberships?.syncPrimaryFromMetadataForBooks(bookIds, executor);
+    }
     await executor.update(books).set({ updatedAt: new Date() }).where(inArray(books.id, bookIds));
   }
 

@@ -9,6 +9,7 @@ import { DialogRoot, DialogContent, DialogPortal, DialogOverlay, DialogClose, Di
 import { formatBytes } from '@/lib/formatting'
 import { getProviderColor } from '@/lib/provider-colors'
 import { providerIconPath } from '@/features/book/lib/provider-icons'
+import { lubimyczytacBookUrl } from '@/features/book/lib/provider-links'
 import { useBookDetail } from '../composables/useBookDetail'
 import { useCoverVersions } from '../composables/useCoverVersions'
 import { getFormatColor } from '../lib/format-colors'
@@ -144,6 +145,24 @@ const providerLinks = computed<ProviderLink[]>(() => {
       fallback: 'RN',
     })
   }
+  if (ids.lubimyczytac) {
+    out.push({
+      key: 'lubimyczytac',
+      label: 'LubimyCzytac',
+      url: lubimyczytacBookUrl(ids.lubimyczytac),
+      iconUrl: providerIconPath('lubimyczytac'),
+      fallback: 'LC',
+    })
+  }
+  if (ids.aladin) {
+    out.push({
+      key: 'aladin',
+      label: 'Aladin',
+      url: `https://www.aladin.co.kr/shop/wproduct.aspx?ItemId=${ids.aladin}`,
+      iconUrl: providerIconPath('aladin'),
+      fallback: '알',
+    })
+  }
   return out
 })
 
@@ -167,6 +186,7 @@ const quickViewCoverAspectRatio = computed(() => {
 
 const primaryFile = computed(() => detail.value?.files.find((f) => f.role === 'primary') ?? detail.value?.files[0] ?? null)
 const isPrimaryAudio = computed(() => primaryFile.value?.format != null && FORMAT_TO_GROUP[primaryFile.value.format] === 'audio')
+const isPrimaryComic = computed(() => primaryFile.value?.format != null && FORMAT_TO_GROUP[primaryFile.value.format] === 'cbx')
 const knownFormats = computed(() => [
   ...new Set((detail.value?.files ?? []).filter((f) => f.format && FORMAT_TO_GROUP[f.format]).map((f) => f.format!)),
 ])
@@ -273,6 +293,7 @@ function handleDelete() {
                 size="mini"
                 class="book-cover-surface--spine-fitted w-24 shrink-0 rounded overflow-hidden relative"
                 :disable-spine="isPrimaryAudio"
+                :is-comic="isPrimaryComic"
                 :class="detail.coverSource && !coverFailed ? 'cursor-zoom-in' : ''"
                 :style="{ aspectRatio: quickViewCoverAspectRatio }"
                 @click="handleCoverClick"
@@ -288,6 +309,7 @@ function handleDelete() {
                   :frame-aspect-ratio="quickViewCoverAspectRatio"
                   loading="eager"
                   :spine="!isPrimaryAudio"
+                  :is-comic="isPrimaryComic"
                   @load="handleCoverLoad"
                   @error="handleCoverError"
                 />

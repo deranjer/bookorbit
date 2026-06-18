@@ -21,6 +21,7 @@ import {
 import { DialogClose, DialogContent, DialogOverlay, DialogPortal, DialogRoot } from 'reka-ui'
 import { getFormatColor } from '@/features/book/lib/format-colors'
 import { providerIconPath } from '@/features/book/lib/provider-icons'
+import { lubimyczytacBookUrl } from '@/features/book/lib/provider-links'
 import { getProviderColor } from '@/lib/provider-colors'
 import { useCoverVersions } from '@/features/book/composables/useCoverVersions'
 import { COVER_ASPECT_RATIO_KEY, DEFAULT_COVER_ASPECT_RATIO } from '@/features/book/lib/cover-aspect-ratio'
@@ -285,6 +286,7 @@ const detailCoverAspectRatio = computed(() => {
 })
 const primaryFile = computed(() => props.book.files.find((f) => f.role === 'primary') ?? props.book.files[0] ?? null)
 const isPrimaryAudio = computed(() => primaryFile.value?.format != null && FORMAT_TO_GROUP[primaryFile.value.format] === 'audio')
+const isPrimaryComic = computed(() => primaryFile.value?.format != null && FORMAT_TO_GROUP[primaryFile.value.format] === 'cbx')
 const readableFiles = computed(() => props.book.files.filter((f) => f.format && READER_OPENABLE_FORMATS.has(f.format)))
 
 // For multi-file audiobooks, collapse all tracks into one representative entry.
@@ -599,6 +601,24 @@ const providerLinks = computed<ProviderLink[]>(() => {
       url: `https://ranobedb.org/book/${ids.ranobedb}`,
       iconUrl: providerIconPath('ranobedb'),
       fallback: 'RN',
+    })
+  }
+  if (ids.lubimyczytac) {
+    out.push({
+      key: 'lubimyczytac',
+      label: 'LubimyCzytac',
+      url: lubimyczytacBookUrl(ids.lubimyczytac),
+      iconUrl: providerIconPath('lubimyczytac'),
+      fallback: 'LC',
+    })
+  }
+  if (ids.aladin) {
+    out.push({
+      key: 'aladin',
+      label: 'Aladin',
+      url: `https://www.aladin.co.kr/shop/wproduct.aspx?ItemId=${ids.aladin}`,
+      iconUrl: providerIconPath('aladin'),
+      fallback: '알',
     })
   }
   return out
@@ -951,6 +971,7 @@ watch(
         <BookCoverSurface
           class="book-cover-surface--spine-fitted relative w-full rounded-sm overflow-hidden"
           :disable-spine="isPrimaryAudio"
+          :is-comic="isPrimaryComic"
           :class="hasCover && coverLoaded && !coverFailed ? 'cursor-zoom-in' : ''"
           :style="{ aspectRatio: detailCoverAspectRatio }"
           @click="handleCoverClick"
@@ -967,6 +988,7 @@ watch(
             loading="eager"
             backdrop-class="blur-lg brightness-50"
             :spine="!isPrimaryAudio"
+            :is-comic="isPrimaryComic"
             @load="handleCoverLoad"
             @error="handleCoverError"
           />
@@ -1181,6 +1203,7 @@ watch(
         <BookCoverSurface
           class="book-cover-surface--spine-fitted group relative w-full rounded-sm overflow-hidden"
           :disable-spine="isPrimaryAudio"
+          :is-comic="isPrimaryComic"
           :class="hasCover && coverLoaded && !coverFailed ? 'cursor-zoom-in' : ''"
           :style="{ aspectRatio: detailCoverAspectRatio }"
           @click="handleCoverClick"
@@ -1208,6 +1231,7 @@ watch(
             loading="eager"
             backdrop-class="blur-lg brightness-50"
             :spine="!isPrimaryAudio"
+            :is-comic="isPrimaryComic"
             @load="handleCoverLoad"
             @error="handleCoverError"
           />

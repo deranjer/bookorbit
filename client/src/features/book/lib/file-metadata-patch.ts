@@ -23,6 +23,8 @@ const FILE_METADATA_PATCH_FIELDS = [
   'koboId',
   'comicvineId',
   'ranobedbId',
+  'lubimyczytacId',
+  'aladinId',
   'authors',
   'genres',
   'narrators',
