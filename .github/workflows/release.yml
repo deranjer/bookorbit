@@ -21,7 +21,11 @@ env:
 jobs:
   commitlint:
     name: Lint PR Conventions
-    if: github.event_name == 'pull_request'
+    # PR title/commit-header conventions and issue references are only enforced
+    # on the canonical upstream repo. On forks (e.g. PoC PRs within
+    # deranjer/bookorbit) the job is skipped so fork-internal PRs aren't blocked
+    # by upstream commit history that predates the fork's stricter rules.
+    if: github.event_name == 'pull_request' && github.repository == 'bookorbit/bookorbit'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
