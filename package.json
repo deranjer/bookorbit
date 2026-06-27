@@ -34,6 +34,8 @@
     "test": "pnpm run test:server && pnpm run test:client",
     "test:server": "pnpm --filter server test",
     "test:client": "pnpm --filter client test:unit --run",
+    "android:emulator": "node ./scripts/android/emulator.mjs",
+    "android:install": "node ./scripts/android/install.mjs",
     "e2e:run": "node ./scripts/e2e/run-suite.mjs",
     "e2e:all": "node ./scripts/e2e/run-suite.mjs all",
     "e2e:list": "node ./scripts/e2e/run-suite.mjs --list",
